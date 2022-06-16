@@ -1,2 +1,2 @@
-# C# code
-this is a sample C# code
+# C# code & Pythod code
+these are C# and Python sample code...
