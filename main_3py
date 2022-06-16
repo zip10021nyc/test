@@ -1,0 +1,1083 @@
+### Portfolio Optiimization
+### Sean Welleck | 2014
+#
+# Finds an optimal allocation of stocks in a portfolio,
+# satisfying a minimum expected return.
+# The problem is posed as a Quadratic Program, and solved
+# using the cvxopt library.
+# Uses actual past stock data, obtained using the stocks module.
+import math
+import sys
+
+import numpy as np
+import pandas as pd
+import datetime
+import cvxopt
+from cvxopt import matrix, solvers
+import matplotlib.pyplot as plt
+
+##########################
+import warnings
+warnings.filterwarnings('ignore')
+warnings.warn('DelftStack')
+warnings.warn('Do not show this message')
+#####################
+solvers.options['show_progress'] = False        # !!!
+
+pd.set_option('display.max_rows', 500)
+pd.set_option('display.max_columns', 500)
+pd.set_option('display.width', 1000)
+
+#from cvxopt import solvers
+#import stocks
+import numpy
+import pandas as pd
+
+# c = cvxopt.matrix([0, -1], tc='d')
+# print('c: ', c)
+# c = numpy.matrix(c)
+# print('c: ', c)
+#
+# c = cvxopt.matrix([0, -1])
+# print('c: ', c)
+# G = cvxopt.matrix([[-1, 1], [3, 2], [2, 3], [-1, 0], [0, -1]], tc='d')
+# print('G: ', G)
+##################
+xDir = r'D:\\Users\\ggu\\Documents\\GU\\MeanVarianceOptimization\\'
+xSPXT = pd.read_csv(xDir + 'SPXT.txt')
+xSPXT['DATE'] = pd.to_datetime(xSPXT['DATE'], format='%m/%d/%Y')
+xAggregateBondTR = pd.read_csv(xDir + 'AggregateBondTR.txt')
+xAggregateBondTR['DATE'] = pd.to_datetime(xAggregateBondTR['DATE'], format='%m/%d/%Y')
+
+# xSI = pd.read_csv(xDir + 'SI.txt')
+# xSI['DATE'] = pd.to_datetime(xSI['DATE'], format='%m/%d/%Y')
+
+xSPX = pd.read_csv(xDir + 'SPX.txt')
+xSPX['DATE'] = pd.to_datetime(xSPX['DATE'], format='%m/%d/%Y')
+
+##xAggregateBondTR = pd.read_csv(xDir + 'AggregateBondTR.txt')
+
+print(xSPXT.head())
+print(xAggregateBondTR.head())
+#print(xSI.head())
+print(xSPX.head())
+
+# xSPXT = pd.merge(xSPXT, xSI, on=['DATE'], how='left')
+xSPXT = pd.merge(xSPXT, xAggregateBondTR, on=['DATE'], how='left')
+xSPXT = pd.merge(xSPXT, xSPX, on=['DATE'], how='left')
+
+# xMinDateSI = xSI['DATE'].min()
+# xMaxDateSI = xSI['DATE'].max()
+
+###xSPXT = xSPXT.loc[(xSPXT['DATE'] >= xMinDateSI) & (xSPXT['DATE'] <= xMaxDateSI)]
+
+#xSPXT['intrinsic_value'].fillna(method='ffill', inplace=True) #fill N/As with previous prices!!!!
+xSPXT['LBUSTRUU'].fillna(method='ffill', inplace=True) #fill N/As with previous prices!!!!
+xSPXT['SPX'].fillna(method='ffill', inplace=True)
+
+xSPXT['SPXT_rtn'] = xSPXT['SPXT'].pct_change()
+#xSPXT['SI_rtn'] = xSPXT['intrinsic_value'].pct_change()
+xSPXT['BondTR_rtn'] = xSPXT['LBUSTRUU'].pct_change()
+xSPXT['SPX_rtn'] = xSPXT['SPX'].pct_change()
+
+xSPXT.to_csv(xDir + 'xDailyIndexes.txt')
+
+xSPXT.rename(columns={'LBUSTRUU': 'BondTR'},inplace=True)
+
+xSPXT = xSPXT.dropna()
+########################
+xUnderlier = 'SPX'  #'SPXT'   #'SPX'
+
+#xDF0 = xSPXT[['DATE', xUnderlier]]
+xDF0 = xSPXT[['DATE', 'SPX', 'SPXT', 'SPX_rtn', 'SPXT_rtn','BondTR_rtn','BondTR']]
+print('xDF0 = ', xDF0.head())
+
+####### These are the generic products we used in learning center. ####
+#-	2Y, 10% hard buffer, 1.5x upside up to 21%
+#-	4Y, 25% barrier, 1x upside no-cap
+#-	6Y, 30% barrier, 1.15x upside no-cap
+#######################################################################
+
+xCap = 0.21 #0.21 #0.21  #1000 #0.21   #1000  #0.21
+xBuffer = -0.10000  ####-0.10  #-0.25   #-0.30   #-0.25
+xTerm = 2  #2  #4  #6   #4 #2  #3 # years
+xAmount = 100
+xLever = 1.500  #1.5  #1.15
+xBufferType = "H"  #"T"  # "H" for regular Buffer; "G" for Geared Buffer (or Barrier); "T" for Trigger Buffer!
+###########################
+
+xTime = 0
+xString3 = 'Structure: ' + 'Buffer Type = ' + xBufferType + '; Term = ' + str(xTerm) + ' years; ' + (str)(xLever) + 'x ' + xUnderlier + '; Cap = '  + (str)(xCap) + '; Buffer = ' + (str)(xBuffer)
+xLastDate = xDF0['DATE'].max()
+xStartDate0 = xDF0['DATE'].min()
+xDF0[xUnderlier + '_UL_rtn_term'] = np.nan
+xDF0['SI_rtn_term'] = np.nan
+xDF0['SPXT_rtn_term'] = np.nan
+xDF0['BondTR_rtn_term'] = np.nan
+xDF0['SPX_rtn_term'] = np.nan
+
+xNew = 1
+##xDF0[xUnderlier + '_rtn'] = xDF0[xUnderlier].pct_change()
+### debug
+#xLastDate = xDF0['DATE'][10]
+
+xTempDF = pd.DataFrame()
+######### this way to get xStartDate; it will NOT miss a single date!!!!
+xDF0['StartDate'] = xDF0['DATE'].shift(xTerm * 252)	# assume 252 trading days per year ####
+############################################
+for xTempDate in xDF0['DATE']:
+	xEndDate = xTempDate
+	#####xStartDate = xEndDate + datetime.timedelta(days=-365 * xTerm)
+	xStartDate = xDF0.loc[xDF0['DATE'] == xEndDate]['StartDate'].values[0]
+	#if (xStartDate < xStartDate0):
+	xDF0.loc[xDF0['DATE'] == xTempDate, 'SI_Cycle'] = xNew
+	if pd.isna(xStartDate):
+		#sys.exit()
+		#break
+		continue
+	xDF = xDF0.loc[(xDF0['DATE'] >= xStartDate) & (xDF0['DATE'] <= xEndDate)]
+	xDF.reset_index(drop=True, inplace=True)
+	#xEndDate = xDF['DATE'][len(xDF) - 1]
+	xStartDate = xDF['DATE'][0]
+	xTime = xTime + 1
+
+	#xDF0['TradingDays'] = len(xDF) - 1
+	xDF0.loc[(xDF0['DATE'] >= xStartDate) & (xDF0['DATE'] <= xEndDate), 'TradingDays'] = len(xDF) - 1
+
+	xStartValue = xDF[xUnderlier][0]
+	xEndValue = xDF[xUnderlier][len(xDF)-1]
+	xPctChange = xEndValue / xStartValue - 1.0
+
+	xStartValueBondTR = xDF['BondTR'][0]
+	xEndValueBondTR = xDF['BondTR'][len(xDF) - 1]
+	xPctChangeBondTR = xEndValueBondTR / xStartValueBondTR - 1.0
+
+	xStartValueSPXT = xDF['SPXT'][0]
+	xEndValueSPXT = xDF['SPXT'][len(xDF) - 1]
+	xPctChangeSPXT = xEndValueSPXT / xStartValueSPXT - 1.0
+
+	xStartValueSPX = xDF['SPX'][0]
+	xEndValueSPX = xDF['SPX'][len(xDF) - 1]
+	xPctChangeSPX = xEndValueSPX / xStartValueSPX - 1.0
+
+	print('start date = ', xStartDate, ';    end date = ', xEndDate, '; pch change = ', xPctChange)
+
+	xDF0.loc[xDF0['DATE'] == xEndDate, xUnderlier + '_UL_rtn_term'] = xPctChange
+	xDF0.loc[xDF0['DATE'] == xEndDate, 'BondTR_rtn_term'] = xPctChangeBondTR
+	xDF0.loc[xDF0['DATE'] == xEndDate, 'SPXT_rtn_term'] = xPctChangeSPXT
+	xDF0.loc[xDF0['DATE'] == xEndDate, 'SPX_rtn_term'] = xPctChangeSPX
+
+	if (xBufferType == 'T'):
+		if (xPctChange < xBuffer):
+			xDF0.loc[xDF0['DATE'] == xEndDate, 'SI_rtn_term'] = xPctChange
+		elif (xPctChange <= 0):
+			xDF0.loc[xDF0['DATE'] == xEndDate, 'SI_rtn_term'] = 0
+		elif (xPctChange * xLever > xCap):  #(((xPctChange + 1) * xLever - 1)> xCap):
+			xDF0.loc[xDF0['DATE'] == xEndDate, 'SI_rtn_term'] = xCap
+		else:
+			xDF0.loc[xDF0['DATE'] == xEndDate, 'SI_rtn_term'] = xPctChange * xLever
+	elif (xBufferType == 'H'):
+		if (xPctChange < xBuffer):
+			xDF0.loc[xDF0['DATE'] == xEndDate, 'SI_rtn_term'] = xPctChange - xBuffer
+		elif (xPctChange <= 0):
+			xDF0.loc[xDF0['DATE'] == xEndDate, 'SI_rtn_term'] = 0
+		elif (xPctChange * xLever > xCap):  #(((xPctChange + 1) * xLever - 1)> xCap):
+			xDF0.loc[xDF0['DATE'] == xEndDate, 'SI_rtn_term'] = xCap
+		else:
+			xDF0.loc[xDF0['DATE'] == xEndDate, 'SI_rtn_term'] = xPctChange * xLever
+	elif (xBufferType == 'G'):
+		if (xPctChange < xBuffer):
+			xK = 1 / (1 + xBuffer)  # 100/(100-30) = 10/7
+			xDF0.loc[xDF0['DATE'] == xEndDate, 'SI_rtn_term'] = xK * (xPctChange - xBuffer)
+		elif (xPctChange <= 0):
+			xDF0.loc[xDF0['DATE'] == xEndDate, 'SI_rtn_term'] = 0
+		elif (xPctChange * xLever > xCap):  #(((xPctChange + 1) * xLever - 1)> xCap):
+			xDF0.loc[xDF0['DATE'] == xEndDate, 'SI_rtn_term'] = xCap
+		else:
+			xDF0.loc[xDF0['DATE'] == xEndDate, 'SI_rtn_term'] = xPctChange * xLever
+	##################################################################################################################
+	#i could have added here to calculate the single SI growth over the entire history (20 or 30 years).  but this calculation
+	# does not look good because it depends on where/when this specific single SI started!!!!  the start date and the maturity
+	# date for this single SI can be critical and is of NO representative power.  the same is true to calculate the valuation of
+	# this specific single SI, the value does NOT have any representative power.
+	if xNew == 1:
+		xPreviousMaturityDate = xStartDate
+		xDF0.loc[xDF0['DATE'] == xStartDate, 'MaturityDate'] = xStartDate
+		xDF0.loc[xDF0['DATE'] == xStartDate, 'LaunchDate'] = xStartDate
+		xDF0.loc[xDF0['DATE'] == xStartDate, 'SI_Cycle'] = 0	#over this first date
+		###xNew = xNew + 1
+	if xStartDate == xPreviousMaturityDate:   # note: it is funny that maybe there is no xStartDate = xPreviousMaturityDate!!!!
+		xDF0.loc[xDF0['DATE'] == xEndDate, 'MaturityDate'] = xEndDate
+		xDF0.loc[xDF0['DATE'] == xEndDate, 'LaunchDate'] = xStartDate
+		xDays = len(xDF) - 1
+		xDF0.loc[xDF0['DATE'] == xEndDate, 'SI_rtn_term_specific'] = \
+			xDF0.loc[xDF0['DATE'] == xEndDate]['SI_rtn_term'].values[0]
+		xDF0.loc[(xDF0['DATE'] > xStartDate) & (xDF0['DATE'] < xEndDate), \
+				 'SI_rtn_term_specific'] = 0
+		xTempCmpRtn = (1 + xDF0.loc[xDF0['DATE'] == xEndDate]['SI_rtn_term'].values[0])**(1 / xDays) - 1.0
+		xDF0.loc[(xDF0['DATE'] > xStartDate) & (xDF0['DATE'] <= xEndDate), \
+				 'SI_rtn_term_specific_cmp'] = xTempCmpRtn
+		xPreviousMaturityDate = xEndDate
+		xNew = xNew + 1
+	xTempDF = xTempDF.append({'start_date':xStartDate, 'end_date':xEndDate, 'previous_maturity_date':xPreviousMaturityDate}, \
+							 ignore_index=True)
+################################################################################################################################
+if (True):
+	xDF0['SI_DailyRtn'] = (1 + xDF0['SI_rtn_term'])**(1 / (252*xTerm)) - 1.0
+	xDF0[xUnderlier + '_UL_DailyRtn'] = (1 + xDF0[xUnderlier + '_UL_rtn_term'])**(1 / (252*xTerm)) - 1.0
+	xDF0['BondTR_DailyRtn'] = (1 + xDF0['BondTR_rtn_term'])**(1 / (252*xTerm)) - 1.0
+	xDF0['SPXT_DailyRtn'] = (1 + xDF0['SPXT_rtn_term']) ** (1 / (252 * xTerm)) - 1.0
+	xDF0['SPX_DailyRtn'] = (1 + xDF0['SPX_rtn_term']) ** (1 / (252 * xTerm)) - 1.0
+else:
+	##### by using actural number of trading days ##########
+	xDF0['SI_DailyRtn'] = (1 + xDF0['SI_rtn_term'])**(1 / (xDF0['TradingDays'])) - 1.0
+	xDF0[xUnderlier + '_UL_DailyRtn'] = (1 + xDF0[xUnderlier + '_UL_rtn_term'])**(1 / (xDF0['TradingDays'])) - 1.0
+	xDF0['BondTR_DailyRtn'] = (1 + xDF0['BondTR_rtn_term'])**(1 / (xDF0['TradingDays'])) - 1.0
+	xDF0['SPXT_DailyRtn'] = (1 + xDF0['SPXT_rtn_term']) ** (1 / (xDF0['TradingDays'])) - 1.0
+	xDF0['SPX_DailyRtn'] = (1 + xDF0['SPX_rtn_term']) ** (1 / (xDF0['TradingDays'])) - 1.0
+################################################################################################################################
+############################ i immediately calculate the equivalent 1 year return #########################
+xDF0['SI_rtn_1_year'] = (1 + xDF0['SI_rtn_term']) ** (1 / xTerm) - 1
+xDF0['SPXT_rtn_1_year_roll'] = (1 + xDF0['SPXT_rtn_term']) ** (1 / xTerm) - 1
+xDF0['BondTR_rtn_1_year_roll'] = (1 + xDF0['BondTR_rtn_term']) ** (1 / xTerm) - 1
+##################
+#xDF0.to_csv(xDir + 'xCalcRtnsOverTerm.txt')
+
+#WKPRICE['rtn_w'] = WKPRICE.groupby('CUSIP')['PRICE'].pct_change()
+xDF0['Year'] = xDF0['DATE'].dt.year
+xDF0['cum_rtn_SPX'] = xDF0.groupby('Year')['SPX_rtn'].apply(lambda x: np.cumprod(1 + x) - 1)
+xDF0['cum_rtn_SPXT'] = xDF0.groupby('Year')['SPXT_rtn'].apply(lambda x: np.cumprod(1 + x) - 1)
+xDF0['cum_rtn_SI'] = xDF0.groupby('Year')['SI_DailyRtn'].apply(lambda x: np.cumprod(1 + x) - 1)
+xDF0['cum_rtn2_UL_' + xUnderlier] = xDF0.groupby('Year')[xUnderlier + '_UL_DailyRtn'].apply(lambda x: np.cumprod(1 + x) - 1)
+xDF0['cum_rtn_BondTR'] = xDF0.groupby('Year')['BondTR_rtn'].apply(lambda x: np.cumprod(1 + x) - 1)
+xDF0['cum_rtn2_BondTR'] = xDF0.groupby('Year')['BondTR_DailyRtn'].apply(lambda x: np.cumprod(1 + x) - 1)
+xDF0['cum_rtn2_SPXT'] = xDF0.groupby('Year')['SPXT_DailyRtn'].apply(lambda x: np.cumprod(1 + x) - 1)
+xDF0['cum_rtn2_SPX'] = xDF0.groupby('Year')['SPX_DailyRtn'].apply(lambda x: np.cumprod(1 + x) - 1)
+
+################## calculate 1 year returns for SPXT, BondTR ##############
+################## SI_rtn_1_year was already done ##########################
+xDF0['SPXT_rtn_1_year'] = xDF0['SPXT'].pct_change(252)
+xDF0['BondTR_rtn_1_year'] = xDF0['BondTR'].pct_change(252)
+#### this following is for the ENTIRE term period #######
+xDF2 = xDF0[['DATE', 'SPXT_rtn', 'SI_DailyRtn', 'BondTR_rtn', 'SPX_rtn', xUnderlier + '_UL_DailyRtn', \
+			 'BondTR_DailyRtn', 'SPXT_DailyRtn', 'SPX_DailyRtn']].copy()
+xDF2.dropna(inplace=True)
+xDF2['SPXT_cum'] = (1+xDF2['SPXT_rtn']).cumprod()
+xDF2['SPX_cum'] = (1+xDF2['SPX_rtn']).cumprod()
+xDF2['SI_cum'] = (1+xDF2['SI_DailyRtn']).cumprod()
+xDF2['BondTR_cum'] = (1+xDF2['BondTR_rtn']).cumprod()
+xDF2[xUnderlier + '_UL_cum2'] = (1+xDF2[xUnderlier + '_UL_DailyRtn']).cumprod()
+xDF2['BondTR_cum2'] = (1+xDF2['BondTR_DailyRtn']).cumprod()
+xDF2['SPXT_cum2'] = (1+xDF2['SPXT_DailyRtn']).cumprod()
+xDF2['SPX_cum2'] = (1+xDF2['SPX_DailyRtn']).cumprod()
+
+xFirstDate = xDF2['DATE'].min()
+xFirstDate = xFirstDate + datetime.timedelta(days=-1)
+
+#### initial values of $1 #############
+xNew_row = pd.DataFrame([[xFirstDate, 1, 1, 1, 1, 1, 1, 1, 1]], columns=['DATE', 'SPXT_cum', 'SI_cum','BondTR_cum', \
+										xUnderlier + '_UL_cum2', 'SPX_cum','BondTR_cum2','SPXT_cum2','SPX_cum2'])
+xDF2 = pd.concat([xDF2, pd.DataFrame(xNew_row)], ignore_index=True)
+xDF2.sort_values(by=['DATE'], ascending=True,inplace=True)
+xDF2.reset_index(drop=True,inplace=True)
+
+xChartTitle = xString3
+xDF2.plot(x='DATE', y=['SI_cum','SPXT_cum','BondTR_cum', xUnderlier + '_UL_cum2', 'SPX_cum','BondTR_cum2','SPXT_cum2','SPX_cum2'])
+plt.title('Performance Comparison: SI vs Equity and Bond\n' + xChartTitle, fontsize=9, ha='center')
+#plt.figtext(0.5,0.9,'Performance Comparison: SI vs S&P 500 Index (TR)', fontsize=15, ha='center')
+#plt.figtext(0.5,0.8,xString3,fontsize=9,ha='center')
+#plt.subplot().yaxis.set_major_formatter('${x:1.2f}')
+plt.subplot().yaxis.set_major_formatter('${x:1.0f}')
+plt.minorticks_on()
+plt.grid(which='both')
+plt.legend()
+plt.xlabel('Time')
+plt.ylabel('Investment Growth')
+plt.savefig(xDir + 'xPerformanceChart_' + xUnderlier + '.png')
+#plt.savefig('plot.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+############################
+xDF0['Year_diff'] = xDF0['Year'] - xDF0['Year'].shift(-1)
+
+################### calculate portfolio value with equal weightings betweem SI and SPXT ##############
+xDF0a = xDF0.loc[xDF0['SI_DailyRtn'].isna()][['DATE', 'SPXT_rtn', 'SI_DailyRtn','BondTR_rtn', 'SPX_rtn', \
+								xUnderlier + '_UL_DailyRtn','BondTR_DailyRtn','SPXT_DailyRtn','SPX_DailyRtn']].copy()
+xLastDateNA = xDF0a['DATE'].max()
+
+xDF0a = xDF0.loc[xDF0['DATE'] >= xLastDateNA][['DATE', 'Year', 'SPXT_rtn', 'SI_DailyRtn', 'BondTR_rtn', \
+					'SPX_rtn', xUnderlier + '_UL_DailyRtn','BondTR_DailyRtn','SPXT_DailyRtn','SPX_DailyRtn','Year_diff']].copy()
+
+xDF0a['PV_SI'] = np.nan
+xDF0a['PV_SPXT'] = np.nan
+xDF0a['PV'] = np.nan
+xDF0a['SPXT_100'] = np.nan
+xDF0a['SI_100'] = np.nan
+xDF0a['BondTR_100'] = np.nan
+xDF0a[xUnderlier + '_UL_term_100'] = np.nan
+xDF0a['SPX_100'] = np.nan
+xDF0a['BondTR_term_100'] = np.nan
+xDF0a['SPXT_term_100'] = np.nan
+xDF0a['SPX_term_100'] = np.nan
+
+################
+########## calculate two portfolios ######
+### 1) 70% Equity SPXT and 30% Aggr Bond ####
+### 2) 70% Equity SPXT and 15% Aggr Bond and 15% SI ####
+xDF02 = xDF0.loc[xDF0['SI_DailyRtn'].isna()][['DATE', 'SPXT_rtn', 'SI_DailyRtn','BondTR_rtn', \
+								'BondTR_DailyRtn','SPXT_DailyRtn','SPX_DailyRtn']].copy()
+xLastDateNA = xDF02['DATE'].max()
+xDF02 = xDF0.loc[xDF0['DATE'] >= xLastDateNA][['DATE', 'Year', 'SPXT_rtn', 'SI_DailyRtn', 'BondTR_rtn', \
+										'BondTR_DailyRtn','SPXT_DailyRtn','SPX_DailyRtn']].copy()
+xDF02.reset_index(drop=True, inplace=True)
+
+xDates = xDF02[['DATE']].copy()
+
+xP1W1_EQ=0.70
+xP1W2_BD=0.30
+xDF02['PV1'] = np.nan
+xDF02['PV1_SPXT'] = np.nan
+xDF02['PV1_Bond'] = np.nan
+
+xP2W1_EQ=0.70
+xP2W2_BD=0.15
+xP2W3_SI=0.15
+xDF02['PV2'] = np.nan
+xDF02['PV2_SPXT'] = np.nan
+xDF02['PV2_SI'] = np.nan
+xDF02['PV2_Bond'] = np.nan
+
+xDF02['PV_SPXT_100'] = np.nan
+xDF02['PV_BondTR_100'] = np.nan
+
+xTime = 1
+for xTempDate in xDF0a['DATE']:
+	print(xTempDate)
+	xThisDate = xTempDate
+	xThisYear = xThisDate.year
+	if (xTime == 1):	# on the start date
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'PV_SI'] = xAmount / 2
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'PV_SPXT'] = xAmount / 2
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'PV'] = xAmount
+
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'SPXT_100'] = xAmount
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'SPX_100'] = xAmount
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'SI_100'] = xAmount
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'BondTR_100'] = xAmount
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, xUnderlier + '_UL_term_100'] = xAmount
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'BondTR_term_100'] = xAmount
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'SPXT_term_100'] = xAmount
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'SPX_term_100'] = xAmount
+
+		##################### two portfolos ###################
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1_Bond'] = xAmount * xP1W2_BD
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1_SPXT'] = xAmount * xP1W1_EQ
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1'] = xAmount
+
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_SPXT'] = xAmount * xP2W1_EQ
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_Bond'] = xAmount * xP2W2_BD
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_SI'] = xAmount * xP2W3_SI
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2'] = xAmount
+
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV_SPXT_100'] = xAmount
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV_BondTR_100'] = xAmount
+
+		xExpirationDate = xThisDate + datetime.timedelta(days=365 * xTerm)
+		xExpirationDate = xDates.loc[xDates['DATE'] <= xExpirationDate]['DATE'].max() ## set the expiraton = a trading date
+		#######################################################
+		xTime = xTime + 1
+		xPreviousDate = xThisDate
+		xPreviousYear = xPreviousDate.year
+		continue
+	else:
+		xPV_SI_PreviousDate = xDF0a[xDF0a['DATE'] == xPreviousDate]['PV_SI'].values[0]
+		xPV_SPXT_PreviousDate = xDF0a[xDF0a['DATE'] == xPreviousDate]['PV_SPXT'].values[0]
+		xPV_PreviousDate = xDF0a[xDF0a['DATE'] == xPreviousDate]['PV'].values[0]
+
+		xSPXT_100_PreviousDate = xDF0a[xDF0a['DATE'] == xPreviousDate]['SPXT_100'].values[0]
+		xSI_100_PreviousDate = xDF0a[xDF0a['DATE'] == xPreviousDate]['SI_100'].values[0]
+		xBondTR_100_PreviousDate = xDF0a[xDF0a['DATE'] == xPreviousDate]['BondTR_100'].values[0]
+		xSPX_100_PreviousDate = xDF0a[xDF0a['DATE'] == xPreviousDate]['SPX_100'].values[0]
+		globals()[xUnderlier + '_UL_term_100_PreviousDate'] = xDF0a[xDF0a['DATE'] == xPreviousDate][xUnderlier + '_UL_term_100'].values[0]
+		xBondTR_term_100_PreviousDate = xDF0a[xDF0a['DATE'] == xPreviousDate]['BondTR_term_100'].values[0]
+		xSPXT_term_100_PreviousDate = xDF0a[xDF0a['DATE'] == xPreviousDate]['SPXT_term_100'].values[0]
+		xSPX_term_100_PreviousDate = xDF0a[xDF0a['DATE'] == xPreviousDate]['SPX_term_100'].values[0]
+
+		xPV_SI_ThisDate = xPV_SI_PreviousDate * (1 + xDF0a[xDF0a['DATE'] == xThisDate]['SI_DailyRtn'].values[0])
+		xPV_SPXT_ThisDate = xPV_SPXT_PreviousDate * (1 + xDF0a[xDF0a['DATE'] == xThisDate]['SPXT_rtn'].values[0])
+		xPV_ThisDate = xPV_SI_ThisDate + xPV_SPXT_ThisDate
+
+		xSPXT_100_ThisDate = xSPXT_100_PreviousDate * (1 + xDF0a[xDF0a['DATE'] == xThisDate]['SPXT_rtn'].values[0])
+		xSI_100_ThisDate = xSI_100_PreviousDate * (1 + xDF0a[xDF0a['DATE'] == xThisDate]['SI_DailyRtn'].values[0])
+		xBondTR_100_ThisDate = xBondTR_100_PreviousDate * (1 + xDF0a[xDF0a['DATE'] == xThisDate]['BondTR_rtn'].values[0])
+		xSPX_100_ThisDate = xSPX_100_PreviousDate * (1 + xDF0a[xDF0a['DATE'] == xThisDate]['SPX_rtn'].values[0])
+		globals()[xUnderlier + '_UL_term_100_ThisDate'] = globals()[xUnderlier + '_UL_term_100_PreviousDate'] * \
+									(1 + xDF0a[xDF0a['DATE'] == xThisDate][xUnderlier + '_UL_DailyRtn'].values[0])
+		xBondTR_term_100_ThisDate = xBondTR_term_100_PreviousDate * \
+									(1 + xDF0a[xDF0a['DATE'] == xThisDate]['BondTR_DailyRtn'].values[0])
+		xSPXT_term_100_ThisDate = xSPXT_term_100_PreviousDate * (
+				1 + xDF0a[xDF0a['DATE'] == xThisDate]['SPXT_DailyRtn'].values[0])
+		xSPX_term_100_ThisDate = xSPX_term_100_PreviousDate * (
+				1 + xDF0a[xDF0a['DATE'] == xThisDate]['SPX_DailyRtn'].values[0])
+
+		######if (xPreviousYear != xThisYear):
+		### rebalanced on the last date of the year
+		if (len(xDF0a.loc[((xDF0a['DATE'] == xThisDate) & (xDF0a['Year_diff'] == -1))]) != 0):
+			xPV_SI_ThisDate = xPV_ThisDate / 2
+			xPV_SPXT_ThisDate = xPV_ThisDate / 2
+		################################
+
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'PV_SI'] = xPV_SI_ThisDate
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'PV_SPXT'] = xPV_SPXT_ThisDate
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'PV'] = xPV_ThisDate
+
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'SI_100'] = xSI_100_ThisDate
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'SPXT_100'] = xSPXT_100_ThisDate
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'BondTR_100'] = xBondTR_100_ThisDate
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'SPX_100'] = xSPX_100_ThisDate
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, xUnderlier + '_UL_term_100'] = globals()[xUnderlier + '_UL_term_100_ThisDate']
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'BondTR_term_100'] = xBondTR_term_100_ThisDate
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'SPXT_term_100'] = xSPXT_term_100_ThisDate
+		xDF0a.loc[xDF0a['DATE'] == xThisDate, 'SPX_term_100'] = xSPX_term_100_ThisDate
+
+		#################### two portfolios ##################
+		xPV1_Bond_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV1_Bond'].values[0]
+		xPV1_SPXT_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV1_SPXT'].values[0]
+		xPV1_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV1'].values[0]
+
+		xPV2_SPXT_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV2_SPXT'].values[0]
+		xPV2_SI_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV2_SI'].values[0]
+		xPV2_Bond_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV2_Bond'].values[0]
+		xPV2_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV2'].values[0]
+
+		xPV_SPXT_100_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV_SPXT_100'].values[0]
+		xPV_BondTR_100_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV_BondTR_100'].values[0]
+
+		xPV1_Bond_ThisDate = xPV1_Bond_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['BondTR_rtn'].values[0])
+		xPV1_SPXT_ThisDate = xPV1_SPXT_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['SPXT_rtn'].values[0])
+		xPV1_ThisDate = xPV1_Bond_ThisDate + xPV1_SPXT_ThisDate
+
+		xPV2_SPXT_ThisDate = xPV2_SPXT_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['SPXT_rtn'].values[0])
+		xPV2_SI_ThisDate = xPV2_SI_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['SI_DailyRtn'].values[0])
+		xPV2_Bond_ThisDate = xPV2_Bond_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['BondTR_rtn'].values[0])
+		xPV2_ThisDate = xPV2_SPXT_ThisDate + xPV2_Bond_ThisDate + xPV2_SI_ThisDate
+
+		xPV_SPXT_100_ThisDate = xPV_SPXT_100_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['SPXT_rtn'].values[0])
+		xPV_BondTR_100_ThisDate = xPV_BondTR_100_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['BondTR_rtn'].values[0])
+
+		### rebalanced on expiration date #########
+		if (xThisDate == xExpirationDate):
+			xPV1_SPXT_ThisDate = xPV1_ThisDate * xP1W1_EQ
+			xPV1_Bond_ThisDate = xPV1_ThisDate * xP1W2_BD
+
+			xPV2_SPXT_ThsDate = xPV2_ThisDate * xP2W1_EQ
+			xPV2_Bond_ThsDate = xPV2_ThisDate * xP2W2_BD
+			xPV2_SI_ThsDate = xPV2_ThisDate * xP2W3_SI
+
+			xExpirationDate = xThisDate + datetime.timedelta(days=365 * xTerm)
+			xExpirationDate = xDates.loc[xDates['DATE'] <= xExpirationDate]['DATE'].max()  ## set the expiraton = a trading date
+		################################
+
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1_SPXT'] = xPV1_SPXT_ThisDate
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1_Bond'] = xPV1_Bond_ThisDate
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1'] = xPV1_ThisDate
+
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_SPXT'] = xPV2_SPXT_ThisDate
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_Bond'] = xPV2_Bond_ThisDate
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_SI'] = xPV2_SI_ThisDate
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2'] = xPV2_ThisDate
+
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV_SPXT_100'] = xPV_SPXT_100_ThisDate
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV_BondTR_100'] = xPV_BondTR_100_ThisDate
+		######################################################
+		xTime = xTime + 1
+		xPreviousDate = xThisDate
+		xPreviousYear = xPreviousDate.year
+
+xDF0a = pd.merge(xDF0a, xDF02[['DATE','PV1','PV2']], on=['DATE'],how='left')
+xDF0a['PV_rtn'] = xDF0a['PV'].pct_change()
+xDF0a['cum_rtn_PV'] = xDF0a.groupby('Year')['PV_rtn'].apply(lambda x: np.cumprod(1 + x) - 1)
+xDF0a['PV1_rtn'] = xDF0a['PV1'].pct_change()
+xDF0a['cum_rtn_PV1'] = xDF0a.groupby('Year')['PV1_rtn'].apply(lambda x: np.cumprod(1 + x) - 1)
+xDF0a['PV2_rtn'] = xDF0a['PV2'].pct_change()
+xDF0a['cum_rtn_PV2'] = xDF0a.groupby('Year')['PV2_rtn'].apply(lambda x: np.cumprod(1 + x) - 1)
+
+xDF0 = pd.merge(xDF0, xDF0a[['DATE', 'PV_SI', 'PV_SPXT', 'PV', 'PV_rtn', 'cum_rtn_PV',\
+							'SI_100', 'SPXT_100', 'BondTR_100', 'SPX_100', xUnderlier + '_UL_term_100',\
+							 'cum_rtn_PV1','cum_rtn_PV2', 'PV1_rtn', 'PV2_rtn','PV1','PV2','BondTR_term_100',\
+							 'SPXT_term_100', 'SPX_term_100']], on=['DATE'], how='left')
+
+#################### calculate statisics ###############
+xAnnRtnByYear = xDF0.loc[xDF0['Year_diff'] != 0][['Year', 'cum_rtn_SI', 'cum_rtn_SPXT', 'cum_rtn_PV', 'cum_rtn_BondTR', \
+												  'cum_rtn_SPX', 'cum_rtn2_UL_' + xUnderlier,'cum_rtn_PV1','cum_rtn_PV2', \
+												  'cum_rtn2_BondTR', 'cum_rtn2_SPXT', 'cum_rtn2_SPX']]
+xAnnRtnByYear.dropna(inplace=True)
+xAnnRtnByYear.reset_index(drop=True, inplace=True)
+
+xStdByYear = xDF0.groupby('Year')['SI_DailyRtn', 'SPXT_rtn', 'PV_rtn', 'BondTR_rtn','SPX_rtn', \
+			xUnderlier + '_UL_DailyRtn','PV1_rtn','PV2_rtn', 'BondTR_DailyRtn', 'SPXT_DailyRtn', \
+								  'SPX_DailyRtn'].std() * np.sqrt(252)
+xCorrByYear = xDF0.groupby('Year')['SI_DailyRtn', 'SPXT_rtn', 'BondTR_rtn', 'SPX_rtn', xUnderlier + '_UL_DailyRtn',\
+								   'PV1_rtn','PV2_rtn','BondTR_DailyRtn','SPXT_DailyRtn','SPX_DailyRtn'].corr()
+xCorrByYear = xCorrByYear.round(4)
+
+xStdByYear.reset_index(drop=False, inplace=True)
+xCorrByYear.reset_index(drop=False, inplace=True)
+
+xStdByYear.dropna(inplace=True)
+xCorrByYear.dropna(inplace=True)
+
+xStdByYear.reset_index(drop=True, inplace=True)
+xCorrByYear.reset_index(drop=True, inplace=True)
+
+xStdByYear.rename(columns={'SI_DailyRtn': 'SI_AnnStd', 'SPXT_rtn': 'SPXT_AnnStd', 'PV_rtn': 'PV_AnnStd',\
+	'BondTR_rtn': 'BondTR_AnnStd', 'SPX_rtn': 'SPX_AnnStd', xUnderlier + '_UL_DailyRtn': xUnderlier + '_UL_AnnStd2', \
+	'PV1_rtn': 'PV1_AnnStd','PV2_rtn':'PV2_AnnStd', 'BondTR_DailyRtn': 'BondTR_AnnStd2', \
+						   'SPXT_DailyRtn': 'SPXT_AnnStd2', 'SPX_DailyRtn': 'SPX_AnnStd2'},inplace=True)
+
+xAnnRtnByYear = pd.merge(xAnnRtnByYear, xStdByYear, on=['Year'], how='left')
+
+xAnnRtnByYear['Sharpe_SI'] = xAnnRtnByYear['cum_rtn_SI'] / xAnnRtnByYear['SI_AnnStd']
+xAnnRtnByYear['Sharpe_PV'] = xAnnRtnByYear['cum_rtn_PV'] / xAnnRtnByYear['PV_AnnStd']
+xAnnRtnByYear['Sharpe_SPXT'] = xAnnRtnByYear['cum_rtn_SPXT'] / xAnnRtnByYear['SPXT_AnnStd']
+xAnnRtnByYear['Sharpe_BondTR'] = xAnnRtnByYear['cum_rtn_BondTR'] / xAnnRtnByYear['BondTR_AnnStd']
+xAnnRtnByYear['Sharpe_SPX'] = xAnnRtnByYear['cum_rtn_SPX'] / xAnnRtnByYear['SPX_AnnStd']
+xAnnRtnByYear['Sharpe2_UL_' + xUnderlier] = xAnnRtnByYear['cum_rtn2_UL_' + xUnderlier] / xAnnRtnByYear[xUnderlier + '_UL_AnnStd2']
+xAnnRtnByYear['Sharpe_PV1'] = xAnnRtnByYear['cum_rtn_PV1'] / xAnnRtnByYear['PV1_AnnStd']
+xAnnRtnByYear['Sharpe_PV2'] = xAnnRtnByYear['cum_rtn_PV2'] / xAnnRtnByYear['PV2_AnnStd']
+xAnnRtnByYear['Sharpe2_BondTR'] = xAnnRtnByYear['cum_rtn2_BondTR'] / xAnnRtnByYear['BondTR_AnnStd2']
+xAnnRtnByYear['Sharpe2_SPXT'] = xAnnRtnByYear['cum_rtn2_SPXT'] / xAnnRtnByYear['SPXT_AnnStd2']
+xAnnRtnByYear['Sharpe2_SPX'] = xAnnRtnByYear['cum_rtn2_SPX'] / xAnnRtnByYear['SPX_AnnStd2']
+
+xAnnRtnByYear.rename(columns={'cum_rtn_SI':'SI_AnnRtn', 'cum_rtn_SPXT':'SPXT_AnnRtn', 'cum_rtn_PV':'PV_AnnRtn', \
+	'cum_rtn_BondTR':'BondTR_AnnRtn', 'cum_rtn_SPX':'SPX_AnnRtn', 'cum_rtn2_UL_' + xUnderlier: xUnderlier + '_UL_AnnRtn2', \
+	'cum_rtn_PV1':'PV1_AnnRtn', 'cum_rtn_PV2':'PV2_AnnRtn', 'cum_rtn2_BondTR':'BondTR_AnnRtn2', \
+							  'cum_rtn2_SPXT':'SPXT_AnnRtn2', 'cum_rtn2_SPX':'SPX_AnnRtn2'},inplace=True)
+
+xAnnRtnByYear['SI_AnnRtn'] = xAnnRtnByYear['SI_AnnRtn'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['PV_AnnRtn'] = xAnnRtnByYear['PV_AnnRtn'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['SPXT_AnnRtn'] = xAnnRtnByYear['SPXT_AnnRtn'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['BondTR_AnnRtn'] = xAnnRtnByYear['BondTR_AnnRtn'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['SPX_AnnRtn'] = xAnnRtnByYear['SPX_AnnRtn'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear[xUnderlier + '_UL_AnnRtn2'] = xAnnRtnByYear[xUnderlier + '_UL_AnnRtn2'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['PV1_AnnRtn'] = xAnnRtnByYear['PV1_AnnRtn'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['PV2_AnnRtn'] = xAnnRtnByYear['PV2_AnnRtn'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['BondTR_AnnRtn2'] = xAnnRtnByYear['BondTR_AnnRtn2'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['SPXT_AnnRtn2'] = xAnnRtnByYear['SPXT_AnnRtn2'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['SPX_AnnRtn2'] = xAnnRtnByYear['SPX_AnnRtn2'].astype(float).map("{:.2%}".format)
+
+xAnnRtnByYear['SI_AnnStd'] = xAnnRtnByYear['SI_AnnStd'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['PV_AnnStd'] = xAnnRtnByYear['PV_AnnStd'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['SPXT_AnnStd'] = xAnnRtnByYear['SPXT_AnnStd'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['BondTR_AnnStd'] = xAnnRtnByYear['BondTR_AnnStd'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['SPX_AnnStd'] = xAnnRtnByYear['SPX_AnnStd'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear[xUnderlier + '_UL_AnnStd2'] = xAnnRtnByYear[xUnderlier + '_UL_AnnStd2'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['PV1_AnnStd'] = xAnnRtnByYear['PV1_AnnStd'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['PV2_AnnStd'] = xAnnRtnByYear['PV2_AnnStd'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['BondTR_AnnStd2'] = xAnnRtnByYear['BondTR_AnnStd2'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['SPXT_AnnStd2'] = xAnnRtnByYear['SPXT_AnnStd2'].astype(float).map("{:.2%}".format)
+xAnnRtnByYear['SPX_AnnStd2'] = xAnnRtnByYear['SPX_AnnStd2'].astype(float).map("{:.2%}".format)
+
+xAnnRtnByYear['Sharpe_SI'] = xAnnRtnByYear['Sharpe_SI'].round(2)
+xAnnRtnByYear['Sharpe_PV'] = xAnnRtnByYear['Sharpe_PV'].round(2)
+xAnnRtnByYear['Sharpe_SPXT'] = xAnnRtnByYear['Sharpe_SPXT'].round(2)
+xAnnRtnByYear['Sharpe_BondTR'] = xAnnRtnByYear['Sharpe_BondTR'].round(2)
+xAnnRtnByYear['Sharpe_SPX'] = xAnnRtnByYear['Sharpe_SPX'].round(2)
+xAnnRtnByYear['Sharpe2_UL_' + xUnderlier] = xAnnRtnByYear['Sharpe2_UL_' + xUnderlier].round(2)
+xAnnRtnByYear['Sharpe_PV1'] = xAnnRtnByYear['Sharpe_PV1'].round(2)
+xAnnRtnByYear['Sharpe_PV2'] = xAnnRtnByYear['Sharpe_PV2'].round(2)
+xAnnRtnByYear['Sharpe2_BondTR'] = xAnnRtnByYear['Sharpe2_BondTR'].round(2)
+xAnnRtnByYear['Sharpe2_SPXT'] = xAnnRtnByYear['Sharpe2_SPXT'].round(2)
+xAnnRtnByYear['Sharpe2_SPX'] = xAnnRtnByYear['Sharpe2_SPX'].round(2)
+
+############## calculate OVERALL ENTIRE PERIOD ##########
+xDF0b = xDF0[['DATE', 'SPXT_rtn', 'SI_DailyRtn', 'PV_rtn', 'BondTR_rtn', 'SPX_rtn', xUnderlier + '_UL_DailyRtn', \
+			  'PV1_rtn', 'PV2_rtn', 'BondTR_DailyRtn', 'SPXT_DailyRtn', 'SPX_DailyRtn']].copy()
+xDF0b.dropna(inplace=True)
+
+xStdDev = xDF0b[['SPXT_rtn', 'SI_DailyRtn', 'PV_rtn', 'BondTR_rtn', 'SPX_rtn', xUnderlier + '_UL_DailyRtn', \
+				 'PV1_rtn', 'PV2_rtn', 'BondTR_DailyRtn', 'SPXT_DailyRtn', 'SPX_DailyRtn']].std()*np.sqrt(252)
+
+xAnnStD_SPXT = xStdDev['SPXT_rtn']
+xAnnStD_SI = xStdDev['SI_DailyRtn']
+xAnnStD_PV = xStdDev['PV_rtn']
+xAnnStD_BondTR = xStdDev['BondTR_rtn']
+xAnnStD_SPX = xStdDev['SPX_rtn']
+globals()['xAnnStD2_UL_' + xUnderlier] = xStdDev[xUnderlier + '_UL_DailyRtn']
+xAnnStD_PV1 = xStdDev['PV1_rtn']
+xAnnStD_PV2 = xStdDev['PV2_rtn']
+xAnnStD2_BondTR = xStdDev['BondTR_DailyRtn']
+xAnnStD2_SPXT = xStdDev['SPXT_DailyRtn']
+xAnnStD2_SPX = xStdDev['SPX_DailyRtn']
+
+xDF0c = xDF0[['DATE', 'SPXT', 'SI_100', 'SPXT_100', 'PV', 'BondTR_100', 'SPX_100', xUnderlier + '_UL_term_100', \
+			  'PV1', 'PV2', 'BondTR_term_100', 'SPXT_term_100', 'SPX_term_100']].copy()
+xDF0c.dropna(inplace=True)
+xDF0c.reset_index(drop=True,inplace=True)
+
+xDF0c['SI_growth'] = xDF0c['SI_100'].pct_change(len(xDF0c)-1)
+xDF0c['SPXT_growth'] = xDF0c['SPXT_100'].pct_change(len(xDF0c)-1)
+xDF0c['PV_growth'] = xDF0c['PV'].pct_change(len(xDF0c)-1)
+xDF0c['BondTR_growth'] = xDF0c['BondTR_100'].pct_change(len(xDF0c)-1)
+xDF0c['SPX_growth'] = xDF0c['SPX_100'].pct_change(len(xDF0c)-1)
+xDF0c[xUnderlier + '_UL_term_growth'] = xDF0c[xUnderlier + '_UL_term_100'].pct_change(len(xDF0c)-1)
+xDF0c['PV1_growth'] = xDF0c['PV1'].pct_change(len(xDF0c)-1)
+xDF0c['PV2_growth'] = xDF0c['PV2'].pct_change(len(xDF0c)-1)
+xDF0c['BondTR_term_growth'] = xDF0c['BondTR_term_100'].pct_change(len(xDF0c)-1)
+xDF0c['SPXT_term_growth'] = xDF0c['SPXT_term_100'].pct_change(len(xDF0c)-1)
+xDF0c['SPX_term_growth'] = xDF0c['SPX_term_100'].pct_change(len(xDF0c)-1)
+
+xTermRtn_SI =xDF0c.loc[xDF0c.index == len(xDF0c)-1]['SI_growth'].values[0]
+xTermRtn_SPXT = xDF0c.loc[xDF0c.index == len(xDF0c)-1]['SPXT_growth'].values[0]
+xTermRtn_PV = xDF0c.loc[xDF0c.index == len(xDF0c)-1]['PV_growth'].values[0]
+xTermRtn_BondTR = xDF0c.loc[xDF0c.index == len(xDF0c)-1]['BondTR_growth'].values[0]
+xTermRtn_SPX = xDF0c.loc[xDF0c.index == len(xDF0c)-1]['SPX_growth'].values[0]
+globals()['xTermRtn2_UL_' + xUnderlier] = xDF0c.loc[xDF0c.index == len(xDF0c)-1][xUnderlier + '_UL_term_growth'].values[0]
+xTermRtn_PV1 = xDF0c.loc[xDF0c.index == len(xDF0c)-1]['PV1_growth'].values[0]
+xTermRtn_PV2 = xDF0c.loc[xDF0c.index == len(xDF0c)-1]['PV2_growth'].values[0]
+xTermRtn2_BondTR = xDF0c.loc[xDF0c.index == len(xDF0c)-1]['BondTR_term_growth'].values[0]
+xTermRtn2_SPXT = xDF0c.loc[xDF0c.index == len(xDF0c)-1]['SPXT_term_growth'].values[0]
+xTermRtn2_SPX = xDF0c.loc[xDF0c.index == len(xDF0c)-1]['SPX_term_growth'].values[0]
+
+xAnnRtn_SI = (1+xTermRtn_SI)**(1/(len(xDF0c)/252)) - 1
+xAnnRtn_SPXT = (1+xTermRtn_SPXT)**(1/(len(xDF0c)/252)) - 1
+xAnnRtn_PV = (1+xTermRtn_PV)**(1/(len(xDF0c)/252)) - 1
+xAnnRtn_BondTR = (1+xTermRtn_BondTR)**(1/(len(xDF0c)/252)) - 1
+xAnnRtn_SPX = (1+xTermRtn_SPX)**(1/(len(xDF0c)/252)) - 1
+globals()['xAnnRtn2_UL_' + xUnderlier] = (1+(globals()['xTermRtn2_UL_' + xUnderlier]))**(1/(len(xDF0c)/252)) - 1
+xAnnRtn_PV1 = (1+xTermRtn_PV1)**(1/(len(xDF0c)/252)) - 1
+xAnnRtn_PV2 = (1+xTermRtn_PV2)**(1/(len(xDF0c)/252)) - 1
+xAnnRtn2_BondTR = (1+xTermRtn2_BondTR)**(1/(len(xDF0c)/252)) - 1
+xAnnRtn2_SPXT = (1+xTermRtn2_SPXT)**(1/(len(xDF0c)/252)) - 1
+xAnnRtn2_SPX = (1+xTermRtn2_SPX)**(1/(len(xDF0c)/252)) - 1
+
+xSharpe_SI = np.round(xAnnRtn_SI / xAnnStD_SI, 4)
+xSharpe_SPXT = np.round( xAnnRtn_SPXT / xAnnStD_SPXT, 4)
+xSharpe_PV = np.round(xAnnRtn_PV / xAnnStD_PV, 4)
+xSharpe_BondTR = np.round(xAnnRtn_BondTR / xAnnStD_BondTR, 4)
+xSharpe_SPX = np.round( xAnnRtn_SPX / xAnnStD_SPX, 4)
+globals()['xSharpe2_UL_' + xUnderlier] = np.round((globals()['xAnnRtn2_UL_' + xUnderlier]) / (globals()['xAnnStD2_UL_' + xUnderlier]), 4)
+xSharpe_PV1 = np.round(xAnnRtn_PV1 / xAnnStD_PV1, 4)
+xSharpe_PV2 = np.round(xAnnRtn_PV2 / xAnnStD_PV2, 4)
+xSharpe2_BondTR = np.round(xAnnRtn2_BondTR / xAnnStD2_BondTR, 4)
+xSharpe2_SPXT = np.round(xAnnRtn2_SPXT / xAnnStD2_SPXT, 4)
+xSharpe2_SPX = np.round(xAnnRtn2_SPX / xAnnStD2_SPX, 4)
+
+xAnnRtn_SI = '{:.2%}'.format(xAnnRtn_SI)
+xAnnRtn_SPXT = '{:.2%}'.format(xAnnRtn_SPXT)
+xAnnRtn_PV = '{:.2%}'.format(xAnnRtn_PV)
+xAnnRtn_BondTR = '{:.2%}'.format(xAnnRtn_BondTR)
+xAnnRtn_SPX = '{:.2%}'.format(xAnnRtn_SPX)
+globals()['xAnnRtn2_UL_' + xUnderlier] = '{:.2%}'.format(globals()['xAnnRtn2_UL_' + xUnderlier])
+xAnnRtn_PV1 = '{:.2%}'.format(xAnnRtn_PV1)
+xAnnRtn_PV2 = '{:.2%}'.format(xAnnRtn_PV2)
+xAnnRtn2_BondTR = '{:.2%}'.format(xAnnRtn2_BondTR)
+xAnnRtn2_SPXT = '{:.2%}'.format(xAnnRtn2_SPXT)
+xAnnRtn2_SPX = '{:.2%}'.format(xAnnRtn2_SPX)
+
+xTermRtn_SI = '{:.2%}'.format(xTermRtn_SI)
+xTermRtn_SPXT = '{:.2%}'.format(xTermRtn_SPXT)
+xTermRtn_PV = '{:.2%}'.format(xTermRtn_PV)
+xTermRtn_BondTR = '{:.2%}'.format(xTermRtn_BondTR)
+xTermRtn_SPX = '{:.2%}'.format(xTermRtn_SPX)
+globals()['xTermRtn2_UL_' + xUnderlier] = '{:.2%}'.format(globals()['xTermRtn2_UL_' + xUnderlier])
+xTermRtn_PV1 = '{:.2%}'.format(xTermRtn_PV1)
+xTermRtn_PV2 = '{:.2%}'.format(xTermRtn_PV2)
+xTermRtn2_BondTR = '{:.2%}'.format(xTermRtn2_BondTR)
+xTermRtn2_SPXT = '{:.2%}'.format(xTermRtn2_SPXT)
+xTermRtn2_SPX = '{:.2%}'.format(xTermRtn2_SPX)
+
+xAnnStD_SPXT = '{:.2%}'.format(xAnnStD_SPXT)
+xAnnStD_SI = '{:.2%}'.format(xAnnStD_SI)
+xAnnStD_PV = '{:.2%}'.format(xAnnStD_PV)
+xAnnStD_BondTR = '{:.2%}'.format(xAnnStD_BondTR)
+xAnnStD_SPX = '{:.2%}'.format(xAnnStD_SPX)
+globals()['xAnnStD2_UL_' + xUnderlier] = '{:.2%}'.format(globals()['xAnnStD2_UL_' + xUnderlier])
+xAnnStD_PV1 = '{:.2%}'.format(xAnnStD_PV1)
+xAnnStD_PV2 = '{:.2%}'.format(xAnnStD_PV2)
+xAnnStD2_BondTR = '{:.2%}'.format(xAnnStD2_BondTR)
+xAnnStD2_SPXT = '{:.2%}'.format(xAnnStD2_SPXT)
+xAnnStD2_SPX = '{:.2%}'.format(xAnnStD2_SPX)
+
+xDF_stats = pd.DataFrame(columns=['Name', 'Rtn_Term',' AnnRtn','AnnStd','Sharpe'])
+xDF_stats.loc[0] = ['SI',xTermRtn_SI, xAnnRtn_SI, xAnnStD_SI, xSharpe_SI]
+xDF_stats.loc[1] = ['SPXT',xTermRtn_SPXT, xAnnRtn_SPXT, xAnnStD_SPXT, xSharpe_SPXT]
+xDF_stats.loc[2] = ['PV',xTermRtn_PV, xAnnRtn_PV, xAnnStD_PV, xSharpe_PV]
+xDF_stats.loc[3] = ['BondTR',xTermRtn_BondTR, xAnnRtn_BondTR, xAnnStD_BondTR, xSharpe_BondTR]
+xDF_stats.loc[4] = ['SPX',xTermRtn_SPX, xAnnRtn_SPX, xAnnStD_SPX, xSharpe_SPX]
+xDF_stats.loc[5] = [xUnderlier + '_term',globals()['xTermRtn2_' + xUnderlier], globals()['xAnnRtn2_' + xUnderlier], \
+					globals()['xAnnStD2_' + xUnderlier], globals()['xSharpe2_' + xUnderlier]]
+xDF_stats.loc[6] = ['PV1',xTermRtn_PV1, xAnnRtn_PV1, xAnnStD_PV1, xSharpe_PV1]
+xDF_stats.loc[7] = ['PV2',xTermRtn_PV2, xAnnRtn_PV2, xAnnStD_PV2, xSharpe_PV2]
+xDF_stats.loc[8] = ['BondTR_term',xTermRtn2_BondTR, xAnnRtn2_BondTR, xAnnStD2_BondTR, xSharpe2_BondTR]
+xDF_stats.loc[9] = ['SPXT_term',xTermRtn2_SPXT, xAnnRtn2_SPXT, xAnnStD2_SPXT, xSharpe2_SPXT]
+xDF_stats.loc[10] = ['SPX_term',xTermRtn2_SPX, xAnnRtn2_SPX, xAnnStD2_SPX, xSharpe2_SPX]
+
+xString5 = np.round(xDF0b[['SPXT_rtn','SI_DailyRtn', 'PV_rtn', 'BondTR_rtn','SPX_rtn', xUnderlier + '_UL_DailyRtn', \
+						   'PV1_rtn', 'PV2_rtn', 'BondTR_DailyRtn', 'SPXT_DailyRtn', 'SPX_DailyRtn']].corr(),4).astype('string')
+xString4 = xDF_stats.astype('string')
+xString1 = xAnnRtnByYear.astype('string')
+xString2 = xCorrByYear.astype('string')
+
+xStartDate = xDF0b['DATE'].min().strftime('%Y-%m-%d')
+xEndDate = xDF0b['DATE'].max().strftime('%Y-%m-%d')
+
+xString = '*** from ' + (str)(xStartDate) + ' to ' + (str)(xEndDate) + ' ***\n\n' +  (str)(xString4) + '\n\n' + \
+		  (str)(xString5) +'\n\n' + (str)(xString1) + '\n\n'+(str)(xString2)
+xString3a = xString3 + '\n\n' + xString
+
+f_w = open(xDir + 'xStats_Term_' + xBufferType + '_' + xUnderlier + '.txt','w')
+f_w.write(xString3a)
+f_w.close()
+
+################
+import matplotlib.pyplot as plt2
+
+xDF0a.plot(x='DATE', y=['SI_100','SPXT_100', 'PV', 'BondTR_100', 'SPX_100', xUnderlier +'_UL_term_100', \
+						'BondTR_term_100', 'SPXT_term_100', 'SPX_term_100'])
+plt2.title('Performance Comparison: SI vs S&P 500 Index (TR)\n' + xChartTitle, fontsize=9, ha='center')
+#plt.figtext(0.5,0.9,'Performance Comparison: SI vs S&P 500 Index (TR)', fontsize=15, ha='center')
+#plt.figtext(0.5,0.8,xString3,fontsize=9,ha='center')
+#plt.subplot().yaxis.set_major_formatter('${x:1.2f}')
+plt2.subplot().yaxis.set_major_formatter('${x:1.0f}')
+plt2.minorticks_on()
+plt2.grid(which='both')
+plt2.legend()
+plt2.xlabel('Time')
+plt2.ylabel('Investment Growth')
+plt2.savefig(xDir + 'xPerformanceChart2_' + xUnderlier + '.png')
+plt2.show()
+###################
+
+# ########## calculate two portfolios ######
+# ### 1) 70% Equity SPXT and 30% Aggr Bond ####
+# ### 2) 70% Equity SPXT and 15% Aggr Bond and 15% SI ####
+# xDF02 = xDF0.loc[xDF0['SI_DailyRtn'].isna()][['DATE', 'SPXT_rtn', 'SI_DailyRtn','BondTR_rtn']].copy()
+# xLastDateNA = xDF02['DATE'].max()
+# xDF02 = xDF0.loc[xDF0['DATE'] >= xLastDateNA][['DATE', 'Year', 'SPXT_rtn', 'SI_DailyRtn', 'BondTR_rtn']].copy()
+# xDF02.reset_index(drop=True, inplace=True)
+#
+# xDates = xDF02[['DATE']].copy()
+#
+# xP1W1_EQ=0.70
+# xP1W2_BD=0.30
+# xDF02['PV1'] = np.nan
+# xDF02['PV1_SPXT'] = np.nan
+# xDF02['PV1_Bond'] = np.nan
+#
+# xP2W1_EQ=0.70
+# xP2W2_BD=0.15
+# xP2W3_SI=0.15
+# xDF02['PV2'] = np.nan
+# xDF02['PV2_SPXT'] = np.nan
+# xDF02['PV2_SI'] = np.nan
+# xDF02['PV2_Bond'] = np.nan
+#
+# xDF02['PV_SPXT_100'] = np.nan
+# xDF02['PV_BondTR_100'] = np.nan
+#
+# xTime = 1
+# for xTempDate in xDF02['DATE']:
+# 	print(xTempDate)
+# 	xThisDate = xTempDate
+# 	xThisYear = xThisDate.year
+# 	if (xTime == 1):	# on the start date
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1_Bond'] = xAmount * xP1W2_BD
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1_SPXT'] = xAmount * xP1W1_EQ
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1'] = xAmount
+#
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_SPXT'] = xAmount * xP2W1_EQ
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_Bond'] = xAmount * xP2W2_BD
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_SI'] = xAmount * xP2W3_SI
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2'] = xAmount
+#
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV_SPXT_100'] = xAmount
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV_BondTR_100'] = xAmount
+#
+# 		xExpirationDate = xThisDate + datetime.timedelta(days=365 * xTerm)
+# 		xExpirationDate = xDates.loc[xDates['DATE'] <= xExpirationDate]['DATE'].max() ## set the expiraton = a trading date
+#
+# 		xTime = xTime + 1
+# 		xPreviousDate = xThisDate
+# 		xPreviousYear = xPreviousDate.year
+# 		continue
+# 	else:
+# 		xPV1_Bond_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV1_Bond'].values[0]
+# 		xPV1_SPXT_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV1_SPXT'].values[0]
+# 		xPV1_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV1'].values[0]
+#
+# 		xPV2_SPXT_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV2_SPXT'].values[0]
+# 		xPV2_SI_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV2_SI'].values[0]
+# 		xPV2_Bond_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV2_Bond'].values[0]
+# 		xPV2_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV2'].values[0]
+#
+# 		xPV_SPXT_100_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV_SPXT_100'].values[0]
+# 		xPV_BondTR_100_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV_BondTR_100'].values[0]
+#
+# 		xPV1_Bond_ThisDate = xPV1_Bond_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['BondTR_rtn'].values[0])
+# 		xPV1_SPXT_ThisDate = xPV1_SPXT_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['SPXT_rtn'].values[0])
+# 		xPV1_ThisDate = xPV1_Bond_ThisDate + xPV1_SPXT_ThisDate
+#
+# 		xPV2_SPXT_ThisDate = xPV2_SPXT_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['SPXT_rtn'].values[0])
+# 		xPV2_SI_ThisDate = xPV2_SI_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['SI_DailyRtn'].values[0])
+# 		xPV2_Bond_ThisDate = xPV2_Bond_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['BondTR_rtn'].values[0])
+# 		xPV2_ThisDate = xPV2_SPXT_ThisDate + xPV2_Bond_ThisDate + xPV2_SI_ThisDate
+#
+# 		xPV_SPXT_100_ThisDate = xPV_SPXT_100_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['SPXT_rtn'].values[0])
+# 		xPV_BondTR_100_ThisDate = xPV_BondTR_100_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['BondTR_rtn'].values[0])
+#
+# 		### rebalanced on expiration date #########
+# 		if (xThisDate == xExpirationDate):
+# 			xPV1_SPXT_ThisDate = xPV1_ThisDate * xP1W1_EQ
+# 			xPV1_Bond_ThisDate = xPV1_ThisDate * xP1W2_BD
+#
+# 			xPV2_SPXT_ThsDate = xPV2_ThisDate * xP2W1_EQ
+# 			xPV2_Bond_ThsDate = xPV2_ThisDate * xP2W2_BD
+# 			xPV2_SI_ThsDate = xPV2_ThisDate * xP2W3_SI
+#
+# 			xExpirationDate = xThisDate + datetime.timedelta(days=365 * xTerm)
+# 			xExpirationDate = xDates.loc[xDates['DATE'] <= xExpirationDate]['DATE'].max()  ## set the expiraton = a trading date
+# 		################################
+#
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1_SPXT'] = xPV1_SPXT_ThisDate
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1_Bond'] = xPV1_Bond_ThisDate
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1'] = xPV1_ThisDate
+#
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_SPXT'] = xPV2_SPXT_ThisDate
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_Bond'] = xPV2_Bond_ThisDate
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_SI'] = xPV2_SI_ThisDate
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2'] = xPV2_ThisDate
+#
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV_SPXT_100'] = xPV_SPXT_100_ThisDate
+# 		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV_BondTR_100'] = xPV_BondTR_100_ThisDate
+#
+# 		xTime = xTime + 1
+# 		xPreviousDate = xThisDate
+# 		xPreviousYear = xPreviousDate.year
+# ###############################################################
+#################### calculate the risk and returns for PV1, PV2, PV_SPXT_100, PV_BondTR_100 ##########
+#################### actually these resutls are already calculated above ###########
+xDF02.reset_index(drop=True,inplace=True)
+xDF02['PV1_rtn'] = xDF02['PV1'].pct_change()
+xDF02['PV2_rtn'] = xDF02['PV2'].pct_change()
+xDF02['PV_SPXT_100_rtn'] = xDF02['PV_SPXT_100'].pct_change()
+xDF02['PV_BondTR_100_rtn'] = xDF02['PV_BondTR_100'].pct_change()
+
+xPV1_AnnStd = xDF02['PV1_rtn'].std()*np.sqrt(252)
+xPV2_AnnStd = xDF02['PV2_rtn'].std()*np.sqrt(252)
+xSPXT_AnnStd = xDF02['PV_SPXT_100_rtn'].std()*np.sqrt(252)
+xBondTR_AnnStd = xDF02['PV_BondTR_100_rtn'].std()*np.sqrt(252)
+
+xPV1_total_growth = xDF02['PV1'][len(xDF02)-1]/xDF02['PV1'][0] - 1
+xPV2_total_growth = xDF02['PV2'][len(xDF02)-1]/xDF02['PV2'][0] - 1
+xSPXT_total_growth = xDF02['PV_SPXT_100'][len(xDF02)-1]/xDF02['PV_SPXT_100'][0] - 1
+xBondTR_total_growth = xDF02['PV_BondTR_100'][len(xDF02)-1]/xDF02['PV_BondTR_100'][0] - 1
+
+xPV1_AnnRtn = (1 + xPV1_total_growth)**(1/((len(xDF02)-1)/252)) - 1
+xPV2_AnnRtn = (1 + xPV2_total_growth)**(1/((len(xDF02)-1)/252)) - 1
+xSPXT_AnnRtn = (1 + xSPXT_total_growth)**(1/((len(xDF02)-1)/252)) - 1
+xBondTR_AnnRtn = (1 + xBondTR_total_growth)**(1/((len(xDF02)-1)/252)) - 1
+
+xPV1_Sharpe = xPV1_AnnRtn / xPV1_AnnStd
+xPV2_Sharpe = xPV2_AnnRtn / xPV2_AnnStd
+xSPXT_Sharpe = xSPXT_AnnRtn / xSPXT_AnnStd
+xBondTR_Sharpe = xBondTR_AnnRtn / xBondTR_AnnStd
+
+xDF_stats.loc[11] = ['xPV1',xPV1_total_growth, xPV1_AnnRtn, xPV1_AnnStd, xPV1_Sharpe]
+xDF_stats.loc[12] = ['xPV2',xPV2_total_growth, xPV2_AnnRtn, xPV2_AnnStd, xPV2_Sharpe]
+xDF_stats.loc[13] = ['xSPXT_100',xSPXT_total_growth, xSPXT_AnnRtn, xSPXT_AnnStd, xSPXT_Sharpe]
+xDF_stats.loc[14] = ['xBondTR_100',xBondTR_total_growth, xBondTR_AnnRtn, xBondTR_AnnStd, xBondTR_Sharpe]
+
+#### it proves that these results are IDENTICAL with the results calculated before!!!!
+xDF_stats.to_csv(xDir + 'xDF_stats_debug.txt')
+#######################################################################################################
+############### plot ############
+################
+import matplotlib.pyplot as plt3
+
+xDF02.rename(columns={'PV1': 'PV1:70% Equity/30% Bond', 'PV2': 'PV2:70% Equity/15% Bond/15% SI'},inplace=True)
+
+#xDF02.plot(x='DATE', y=['PV1:70% Equity/30% Bond', 'PV2:70% Equity/15% Bond/15% SI','PV_SPXT_100', 'PV_BondTR_100'])
+xDF02.plot(x='DATE', y=['PV1:70% Equity/30% Bond', 'PV2:70% Equity/15% Bond/15% SI'])
+if xBufferType=='H':
+	xChartTitle3 = '(Hard Buffer Note #1)'
+elif xBufferType=='T':
+	if xTerm == 4:
+		xChartTitle3='(Barrier Buffer Note #2)'
+	elif xTerm == 6:
+		xChartTitle3 = '(Barrier Buffer Note #3)'
+else:
+	xChartTitle3 = '(Geared Buffer Note)'
+plt3.title('Performance Comparison\n' + xChartTitle3, fontsize=9, ha='center')
+#plt3.title('Performance Comparison: {70% Equity/30% Bond} vs {70% Equity/15% Bond/15% SI}\n' + xChartTitle, fontsize=9, ha='center')
+#plt.figtext(0.5,0.9,'Performance Comparison: SI vs S&P 500 Index (TR)', fontsize=15, ha='center')
+#plt.figtext(0.5,0.8,xString3,fontsize=9,ha='center')
+#plt.subplot().yaxis.set_major_formatter('${x:1.2f}')
+plt3.subplot().yaxis.set_major_formatter('${x:1.0f}')
+plt3.minorticks_on()
+plt3.grid(which='both')
+plt3.legend()
+plt3.xlabel('Time')
+plt3.ylabel('Investment Growth')
+plt3.savefig(xDir + 'xPerformanceChart3_' + xUnderlier + '.png')
+plt3.show()
+###################
+
+xDF0 = pd.merge(xDF0, xDF02[['DATE','PV1_SPXT','PV1_Bond','PV1:70% Equity/30% Bond','PV2_SPXT','PV2_Bond','PV2_SI','PV2:70% Equity/15% Bond/15% SI','PV_SPXT_100','PV_BondTR_100']], on=['DATE'],how='left')
+xDF0.to_csv(xDir + 'xCalcRtnsOverTerm4SI_'+ xUnderlier + '.txt')
+################# compounded return group by SI_Cycle ##########
+xSI_cum_DailyRtn_vs_term = xDF0.groupby(['SI_Cycle'])[['SI_DailyRtn','SI_rtn_term_specific']].apply(lambda x: (np.cumprod(1 + x) - 1).iloc[-1])
+xSI_cum_DailyRtn_vs_term.reset_index(inplace=True)
+xSI_cum_DailyRtn_vs_term['SI_DailyRtn'] = xSI_cum_DailyRtn_vs_term['SI_DailyRtn'].astype(float).map("{:.2%}".format)
+xSI_cum_DailyRtn_vs_term['SI_rtn_term_specific'] = xSI_cum_DailyRtn_vs_term['SI_rtn_term_specific'].astype(float).map("{:.2%}".format)
+xTempDF = xDF0[['SI_Cycle','LaunchDate','MaturityDate']].copy()
+xTempDF.dropna(inplace=True)
+xSI_cum_DailyRtn_vs_term = pd.merge(xSI_cum_DailyRtn_vs_term,xTempDF,on=['SI_Cycle'],how='left')
+xSI_cum_DailyRtn_vs_term.to_csv(xDir + 'xSI_cum_DailyRtn_vs_term_'+ xUnderlier + '.txt')
+############
+################ maximum drawdowns ################
+def max_dd(returns):
+    """Assumes returns is a pandas Series"""
+    r = returns.add(1).cumprod()
+    dd = r.div(r.cummax()).sub(1)
+    mdd = dd.min()
+    end = returns.index[dd.argmin()]
+    start = returns.index[r[:end].argmax()]
+    return mdd, start, end
+
+#########
+xRtns = xDF0[['DATE','SI_DailyRtn']].copy()
+xRtns.dropna(inplace=True)
+xRtns.set_index('DATE',inplace=True)
+xRtns.index.name = None
+s = pd.Series(xRtns['SI_DailyRtn'], index=xRtns.index)
+
+xMDD,xStart, xEnd = max_dd(s)
+
+xStartValueMax = xDF0.loc[xDF0['DATE']==xStart]['SI_100']
+xEndValueMin = xDF0.loc[xDF0['DATE']==xEnd]['SI_100']
+print('maxDD:', xMDD, 'start: ', xStart, 'start value:', xStartValueMax, '; end: ', xEnd, ';end value: ', xEndValueMin)
+
+######################### TWO PORTFOLIOS 70/30 and 70/15/15 ###############
+######################### simply using the 6/4/2 years returns ############
+
+################
+########## calculate two portfolios ######
+### 1) 70% Equity SPXT and 30% Aggr Bond ####
+### 2) 70% Equity SPXT and 15% Aggr Bond and 15% SI ####
+xDF02 = xDF0.loc[~xDF0['MaturityDate'].isna()][['DATE', 'LaunchDate','MaturityDate','SPX','SPXT','BondTR','SPXT_rtn_term', \
+											  'SI_rtn_term','BondTR_rtn_term', 'SPX_rtn_term']].copy()
+xDF02 = xDF02.dropna(axis=0, subset=['MaturityDate'])
+xDF02.reset_index(drop=True, inplace=True)
+
+xP1W1_EQ=0.70
+xP1W2_BD=0.30
+xDF02['PV1'] = np.nan
+xDF02['PV1_SPXT'] = np.nan
+xDF02['PV1_Bond'] = np.nan
+
+xP2W1_EQ=0.70
+xP2W2_BD=0.15
+xP2W3_SI=0.15
+xDF02['PV2'] = np.nan
+xDF02['PV2_SPXT'] = np.nan
+xDF02['PV2_SI'] = np.nan
+xDF02['PV2_Bond'] = np.nan
+
+xTime = 1
+for xTempDate in xDF02['DATE']:
+	print(xTempDate)
+	xThisDate = xTempDate
+	xThisYear = xThisDate.year
+	if (xTime == 1):	# on the start date
+		##################### two portfolos ###################
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1_Bond'] = xAmount * xP1W2_BD
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1_SPXT'] = xAmount * xP1W1_EQ
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1'] = xAmount
+
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_SPXT'] = xAmount * xP2W1_EQ
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_Bond'] = xAmount * xP2W2_BD
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_SI'] = xAmount * xP2W3_SI
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2'] = xAmount
+
+		#xExpirationDate = xThisDate + datetime.timedelta(days=365 * xTerm)
+		#xExpirationDate = xDates.loc[xDates['DATE'] <= xExpirationDate]['DATE'].max() ## set the expiraton = a trading date
+		#######################################################
+		xTime = xTime + 1
+		xPreviousDate = xThisDate
+		#xPreviousYear = xPreviousDate.year
+		continue
+	else:
+		#################### two portfolios ##################
+		xPV1_Bond_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV1_Bond'].values[0]
+		xPV1_SPXT_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV1_SPXT'].values[0]
+		xPV1_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV1'].values[0]
+
+		xPV2_SPXT_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV2_SPXT'].values[0]
+		xPV2_SI_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV2_SI'].values[0]
+		xPV2_Bond_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV2_Bond'].values[0]
+		xPV2_PreviousDate = xDF02[xDF02['DATE'] == xPreviousDate]['PV2'].values[0]
+
+		xPV1_Bond_ThisDate = xPV1_Bond_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['BondTR_rtn_term'].values[0])
+		xPV1_SPXT_ThisDate = xPV1_SPXT_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['SPXT_rtn_term'].values[0])
+		xPV1_ThisDate = xPV1_Bond_ThisDate + xPV1_SPXT_ThisDate
+
+		xPV2_SPXT_ThisDate = xPV2_SPXT_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['SPXT_rtn_term'].values[0])
+		xPV2_SI_ThisDate = xPV2_SI_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['SI_rtn_term'].values[0])
+		xPV2_Bond_ThisDate = xPV2_Bond_PreviousDate * (1 + xDF02[xDF02['DATE'] == xThisDate]['BondTR_rtn_term'].values[0])
+		xPV2_ThisDate = xPV2_SPXT_ThisDate + xPV2_Bond_ThisDate + xPV2_SI_ThisDate
+		### rebalanced on expiration date #########
+		if (True):  #(xThisDate == xExpirationDate):  # every day is expiration date
+			xPV1_SPXT_ThisDate = xPV1_ThisDate * xP1W1_EQ
+			xPV1_Bond_ThisDate = xPV1_ThisDate * xP1W2_BD
+
+			xPV2_SPXT_ThsDate = xPV2_ThisDate * xP2W1_EQ
+			xPV2_Bond_ThsDate = xPV2_ThisDate * xP2W2_BD
+			xPV2_SI_ThsDate = xPV2_ThisDate * xP2W3_SI
+
+			#xExpirationDate = xThisDate + datetime.timedelta(days=365 * xTerm)
+			#xExpirationDate = xDates.loc[xDates['DATE'] <= xExpirationDate]['DATE'].max()  ## set the expiraton = a trading date
+		################################
+
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1_SPXT'] = xPV1_SPXT_ThisDate
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1_Bond'] = xPV1_Bond_ThisDate
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV1'] = xPV1_ThisDate
+
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_SPXT'] = xPV2_SPXT_ThisDate
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_Bond'] = xPV2_Bond_ThisDate
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2_SI'] = xPV2_SI_ThisDate
+		xDF02.loc[xDF02['DATE'] == xThisDate, 'PV2'] = xPV2_ThisDate
+		######################################################
+		xTime = xTime + 1
+		xPreviousDate = xThisDate
+		#xPreviousYear = xPreviousDate.year
+
+xDF02.to_csv(xDir + 'xTwoPortfolios.txt')
+
+xTempDF = xDF0[['DATE','SI_rtn_1_year','SPXT_rtn_1_year','BondTR_rtn_1_year','SPXT_rtn_1_year_roll','BondTR_rtn_1_year_roll']].copy()
+xTempDF.dropna(inplace=True)
+
+xAnnRtn_roll = xTempDF[['SI_rtn_1_year','SPXT_rtn_1_year','BondTR_rtn_1_year','SPXT_rtn_1_year_roll','BondTR_rtn_1_year_roll']].mean()
+xAnnStd_roll = xTempDF[['SI_rtn_1_year','SPXT_rtn_1_year','BondTR_rtn_1_year','SPXT_rtn_1_year_roll','BondTR_rtn_1_year_roll']].std()
+
+xAnnRtn_roll=pd.DataFrame(xAnnRtn_roll, columns = ["AnnRtn"])
+xAnnStd_roll=pd.DataFrame(xAnnStd_roll, columns = ["AnnStd"])
+
+xAnnRtn_roll.reset_index(inplace=True)
+xAnnStd_roll.reset_index(inplace=True)
+
+xAnnRtn_Std_roll = pd.merge(xAnnRtn_roll,xAnnStd_roll,on=['index'],how='left')
+xAnnRtn_Std_roll['Sharpe'] = xAnnRtn_Std_roll['AnnRtn'] / xAnnRtn_Std_roll['AnnStd']
+xAnnRtn_Std_roll['AnnRtn'] = xAnnRtn_Std_roll['AnnRtn'].astype(float).map("{:.2%}".format)
+xAnnRtn_Std_roll['AnnStd'] = xAnnRtn_Std_roll['AnnStd'].astype(float).map("{:.2%}".format)
+xAnnRtn_Std_roll['Sharpe'] = xAnnRtn_Std_roll['Sharpe'].astype(float).map("{:.4}".format)
+
+xCorrAnnRtn_roll =round(xTempDF[['SI_rtn_1_year','SPXT_rtn_1_year','BondTR_rtn_1_year','SPXT_rtn_1_year_roll','BondTR_rtn_1_year_roll']].corr(),4)
+
+xString_roll1 = xAnnRtn_Std_roll.astype('string')
+xString_roll2 = xCorrAnnRtn_roll.astype('string')
+
+xString_roll = str(xString3) + '\n\n' +str(xString_roll1) + '\n\n' + str(xString_roll2)
+f_w = open(xDir + 'xStats_roll_' + xBufferType + '_' + xUnderlier + '.txt','w')
+f_w.write(xString_roll)
+f_w.close()

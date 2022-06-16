@@ -1,0 +1,2608 @@
+### Portfolio Optiimization
+### Sean Welleck | 2014
+#
+# Finds an optimal allocation of stocks in a portfolio,
+# satisfying a minimum expected return.
+# The problem is posed as a Quadratic Program, and solved
+# using the cvxopt library.
+# Uses actual past stock data, obtained using the stocks module.
+import math
+
+import numpy as np
+import pandas as pd
+import cvxopt
+from cvxopt import matrix, solvers
+import matplotlib.pyplot as plt
+
+solvers.options['show_progress'] = False        # !!!
+
+#from cvxopt import solvers
+#import stocks
+import numpy
+import pandas as pd
+
+c = cvxopt.matrix([0, -1], tc='d')
+print('c: ', c)
+c = numpy.matrix(c)
+print('c: ', c)
+
+c = cvxopt.matrix([0, -1])
+print('c: ', c)
+G = cvxopt.matrix([[-1, 1], [3, 2], [2, 3], [-1, 0], [0, -1]], tc='d')
+print('G: ', G)
+##################
+xDir = r'D:\\Users\\ggu\\Documents\\GU\\MeanVarianceOptimization\\'
+xSPXT = pd.read_csv(xDir + 'SPXT.txt')
+xSPXT['DATE'] = pd.to_datetime(xSPXT['DATE'], format='%m/%d/%Y')
+xAggregateBondTR = pd.read_csv(xDir + 'AggregateBondTR.txt')
+xAggregateBondTR['DATE'] = pd.to_datetime(xAggregateBondTR['DATE'], format='%m/%d/%Y')
+#xSI = pd.read_csv(xDir + 'SI.txt')
+
+xSI = pd.read_csv(xDir + 'xCalcRtnsOverTerm4SI.txt',usecols = ['DATE','SI_100'])
+xSI['DATE'] = pd.to_datetime(xSI['DATE'], format='%Y-%m-%d')
+
+print(xSPXT.head())
+print(xAggregateBondTR.head())
+print(xSI.head())
+
+xSPXT = pd.merge(xSPXT, xSI, on=['DATE'], how='left')
+xSPXT = pd.merge(xSPXT, xAggregateBondTR, on=['DATE'], how='left')
+#xTest3=pd.merge(xTest2,xTestDATE2[['YEAR','WK','DATE2']],on=['YEAR','WK'],how='left')
+
+xSPXT.rename(columns={'SI_100':'SI', 'LBUSTRUU':'BondTR'},inplace=True)
+
+xMinDateSI = xSI['DATE'].min()
+xMaxDateSI = xSI['DATE'].max()
+
+xSPXT = xSPXT.loc[(xSPXT['DATE'] >= xMinDateSI) & (xSPXT['DATE'] <= xMaxDateSI)]
+
+xSPXT['SI'].fillna(method='ffill', inplace=True) #fill N/As with previous prices!!!!
+xSPXT['BondTR'].fillna(method='ffill', inplace=True) #fill N/As with previous prices!!!!
+
+xSPXT['SPXT_rtn'] = xSPXT['SPXT'].pct_change()
+xSPXT['SI_rtn'] = xSPXT['SI'].pct_change()
+xSPXT['BondTR_rtn'] = xSPXT['BondTR'].pct_change()
+
+xSPXT.to_csv(xDir + 'xSPXT.txt')
+#############################################################
+xUnderlier = 'SPX'  #'SPX'
+xSubDir1 = r'2YearsHardBufferNote\\'
+xSubDir2 = r'4YearsBarrierNote\\'
+xSubDir3 = r'6YearsTriggerBuffer\\'
+
+xSubText1 = 'Hard Buffer Note #1'
+xSubText2 = 'Barrier Buffer Note #2'
+xSubText3 = 'Barrier Buffer Note #3'
+
+xBufferNoteNumber = '2' ###'2'  ###'1'  # 3
+
+if xBufferNoteNumber =='1':
+	xTerm='2 years'
+elif xBufferNoteNumber == '2':
+	xTerm='4 years'
+elif xBufferNoteNumber == '3':
+	xTerm='6 years'
+
+xSubDir = globals()['xSubDir' + xBufferNoteNumber]
+xSubText = globals()['xSubText' + xBufferNoteNumber]
+
+xSI2 = pd.read_csv(xDir + xSubDir + 'xCalcRtnsOverTerm4SI_' + xUnderlier + '.txt',usecols = ['DATE','SI_100','SPXT_100', \
+				'BondTR_100','SPX_100','SPX_term_100','BondTR_term_100','SPXT_term_100','SPX_term_100',\
+				'BondTR_rtn_term','SPXT_rtn_term','SI_rtn_term', 'BondTR_rtn_1_year',\
+				'SPXT_rtn_1_year','SI_rtn_1_year','SPXT_rtn_1_year_roll','BondTR_rtn_1_year_roll'])
+xSI2['DATE'] = pd.to_datetime(xSI2['DATE'], format='%Y-%m-%d')
+
+xSPXT = xSI2.copy()
+xSPXT.rename(columns={'SI_100':'SI','BondTR_100':'BondTR','SPXT_100':'SPXT','SPX_100':'SPX', \
+	'SPX_term_100':'SPX_term','BondTR_term_100':'BondTR_term','SPXT_term_100':'SPXT_term','SPX_term_100':'SPX_term'},inplace=True)
+xSPXT['SPXT_rtn'] = xSPXT['SPXT'].pct_change()
+xSPXT['SI_rtn'] = xSPXT['SI'].pct_change()
+xSPXT['BondTR_rtn'] = xSPXT['BondTR'].pct_change()
+xSPXT['SPX_rtn'] = xSPXT['SPX'].pct_change()
+xSPXT['SPX_term_rtn'] = xSPXT['SPX_term'].pct_change()
+xSPXT['BondTR_term_rtn'] = xSPXT['BondTR_term'].pct_change()
+xSPXT['SPXT_term_rtn'] = xSPXT['SPXT_term'].pct_change()
+xSPXT['SPX_term_rtn'] = xSPXT['SPX_term'].pct_change()
+
+xSPXT = xSPXT.dropna()
+
+############################ EQUITY AND BOND ONLY #################
+xSI_indicator = False
+if (xSI_indicator):
+	xRtns = xSPXT[['SPXT_rtn', 'BondTR_rtn', 'SI_rtn']]
+else:
+	xRtns = xSPXT[['SPXT_rtn', 'BondTR_rtn']]
+
+xCash = False
+if xCash:
+	xRtns['cash_rtn'] = 0.025 / 252
+
+#WKPRICE['rtn_w'] = WKPRICE.groupby('CUSIP')['PRICE'].pct_change()
+#WKPRICE['std_w'] = WKPRICE.groupby('CUSIP')['rtn_w'].apply(pd.rolling_std,window=52*2,min_periods=26)
+#WKPRICE.rename(columns={'DATE':'TueDATE'},inplace=True)
+
+print(xSPXT.head())
+print(xRtns.head())
+print(xRtns.tail())
+
+std_vec = xRtns.std(axis=0) * numpy.sqrt(252)
+
+print('daily obs:\n', xRtns.count(axis=0))
+print('daily mean:\n', xRtns.mean(axis=0))
+print('daily Std:\n', xRtns.std(axis=0))
+print('correlation:\n', xRtns.corr())
+print('covariance:\n', xRtns.cov())
+print(xRtns.describe())
+
+#A = xRtns.values
+print('xRtns: ', xRtns.head())
+##print('A: ', A)
+covs = xRtns.cov() * (252 ^ 2)
+print('covs: ', covs)
+
+covs = covs.values
+
+print('covs: ', covs)
+avg_ret = cvxopt.matrix(xRtns.mean(axis=0))    #.T
+avg_ret = avg_ret * 252	#annualized
+print('avg_ret: ', avg_ret)
+#########
+############
+
+n = len(avg_ret)
+print('n = ', n)
+r_min2 = min(avg_ret)
+print('r_min2 = ', r_min2)
+
+r_max2 = max(avg_ret)
+print('r_max2 = ', r_max2)
+
+
+# from numpy.linalg import eig
+# values, vectors = eig(covs)
+# print('values: ', values)
+# print('eigen vector: ', vectors)
+
+###################################################################
+# solves the QP, where x is the allocation of the portfolio:
+# minimize   x'Px + q'x
+# subject to Gx <= h
+#            Ax == b
+#
+# Input:  n       - # of assets
+#         avg_ret - nx1 matrix of average returns
+#         covs    - nxn matrix of return covariance
+#         r_min   - the minimum expected return that you'd
+#                   like to achieve
+# Output: sol - cvxopt solution object
+def optimize_portfolio(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	G = cvxopt.matrix(numpy.concatenate((
+		-numpy.transpose(numpy.array(avg_ret)),
+		-numpy.identity(n)), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		-numpy.ones((1, 1))*r_min,
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	A = cvxopt.matrix(1.0, (1, n))
+	b = cvxopt.matrix(1.0)
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+
+# ### setup the parameters
+# symbols = ['GOOG', 'AIMC', 'CE', 'BH', 'AHGP', 'AB', 'HLS', 'BKH', 'LUV']
+# # pull data from this date range
+# start   = '1/1/2010'
+# end     = '1/1/2014'
+# n       = len(symbols)
+# # average yearly return for each stock
+# avg_ret = matrix(map(lambda s: stocks.avg_return(s, start, end, 'y'), symbols))
+# # covariance of asset returns
+# covs    = matrix(numpy.array(stocks.cov_matrix(symbols, start, end, 'y')))
+# # minimum expected return threshold
+
+### solve
+
+P = cvxopt.matrix(covs)
+returns = []
+risks = []
+portfolios = []
+df = pd.DataFrame()
+columns = ['w_{}'.format(x) for x in range(1, n + 1)] + ['risk', 'return']
+
+xStep = 0.001   #0.001
+for delta_r in numpy.arange(r_min2, r_max2, xStep):
+	print('delta_r: ', delta_r)
+	w = optimize_portfolio(n, avg_ret, covs, delta_r)['x']
+	print('w: ', w)
+	print('w.T', w.T)
+	w2 = numpy.matrix(w.T)
+	print('w2.T', w2)
+	return2 = (w.T * avg_ret)[0]
+	risk2 = numpy.asscalar(numpy.sqrt(w.T * P * w))
+	print('return2: ', return2)
+	print('risk2: ', risk2)
+
+	returns.append(return2)
+	risks.append(risk2)
+
+	w2 = numpy.insert(w2, w2.size, [risk2, return2])
+	print('w2:', w2)
+	df = df.append(pd.DataFrame(w2, columns=[columns]), ignore_index=True)
+
+print('df_portfolios: \n', df)
+# print('df_portfolios: \n', df.head())
+# print('df_portfolios: \n', df.tail())
+
+df.to_csv(xDir + 'xOptimalPortfolio_Equity_Bond.txt')
+
+
+fig, ax = plt.subplots()
+ax.plot(risks, returns, color='red', label='Equity/Bond')
+fig.suptitle('Efficient Frontiers for ' + xSubText, fontsize=16,y=0.95)
+ax.set_xlabel('Risk (Annualized Std)', fontsize=10)
+ax.set_ylabel('Annualized Return', fontsize=10)
+
+# plt.ylabel('mean')
+# plt.xlabel('std')
+# plt.title('Efficient Frontier xx with underlying index ' + xUnderlier)
+# #plt.plot(risks, returns, 'y-o')
+# plt.plot(risks, returns, color='red',label='Equity/Bond')
+# plt.legend(loc='lower right')
+# import matplotlib.ticker as mtick
+# plt.axis()
+
+xStock_scater = plt.scatter(std_vec[0], avg_ret[0], marker='x', color='red',label='Stock')	#stock
+xBond_scatter = plt.scatter(std_vec[1], avg_ret[1], marker='*', color='green',label='Bond')	#bond
+if xSI_indicator:
+	if xCash:
+		xSI_scatter = plt.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+		xCash_scatter = plt.scatter(std_vec[3], avg_ret[3], marker='+', color='blue',label='Cash')  # cash
+	else:
+		xSI_scatter = plt.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+else:
+	if xCash:
+		xCash_scatter = plt.scatter(std_vec[2], avg_ret[2], marker='+', color='blue',label='Cash')  # cash
+	else:
+		print ('nothing here')
+#plt.show()
+#plt.show(block=False)
+#plt.interactive(False)
+#plt.show(block=True)
+#plt.interactive(False)
+############################
+
+##plt.xlim(xmin=0)
+##plt.ylim(ymin=0.02)
+
+##plt.show()
+############# CASE 2 ###########################
+############################ EQUITY, BOND ONLY AND SI #################
+xSI_indicator = True
+if (xSI_indicator):
+	xRtns = xSPXT[['SPXT_rtn', 'BondTR_rtn', 'SI_rtn']]
+else:
+	xRtns = xSPXT[['SPXT_rtn', 'BondTR_rtn']]
+
+xCash = False
+if xCash:
+	xRtns['cash_rtn'] = 0.025 / 252
+
+#WKPRICE['rtn_w'] = WKPRICE.groupby('CUSIP')['PRICE'].pct_change()
+#WKPRICE['std_w'] = WKPRICE.groupby('CUSIP')['rtn_w'].apply(pd.rolling_std,window=52*2,min_periods=26)
+#WKPRICE.rename(columns={'DATE':'TueDATE'},inplace=True)
+
+print(xSPXT.head())
+print(xRtns.head())
+print(xRtns.tail())
+
+std_vec = cvxopt.matrix(xRtns.std(axis=0)) * numpy.sqrt(252)
+################
+##std_vec[2] = 0.06
+#############
+print('daily obs:\n', xRtns.count(axis=0))
+print('daily mean:\n', xRtns.mean(axis=0))
+print('daily Std:\n', xRtns.std(axis=0))
+print('correlation:\n', xRtns.corr())
+print('covariance:\n', xRtns.cov())
+print(xRtns.describe())
+
+#A = xRtns.values
+print('xRtns: ', xRtns.head())
+##print('A: ', A)
+covs = xRtns.cov() * (252 ^ 2)
+print('covs: ', covs)
+
+covs = covs.values
+print('covs: ', covs)
+
+corr = xRtns.corr()
+corr = corr.values
+
+################ alternative way to calculate covs ########
+xL = [std_vec[0],std_vec[1],std_vec[2]]
+xDiag_std = np.diag(xL)
+#covs = std_vec * corr * std_vec.T
+covs_2 = cvxopt.matrix(xDiag_std) * cvxopt.matrix(corr) * cvxopt.matrix(xDiag_std)
+### note:  this calculation is slightly different from the
+##################
+
+avg_ret = cvxopt.matrix(xRtns.mean(axis=0))    #.T
+avg_ret = avg_ret * 252	#annualized
+print('avg_ret: ', avg_ret)
+######### testing #########
+###avg_ret[2] = avg_ret[2] / 3
+##########################
+
+n = len(avg_ret)
+print('n = ', n)
+r_min2 = min(avg_ret)
+print('r_min2 = ', r_min2)
+
+r_max2 = max(avg_ret)
+print('r_max2 = ', r_max2)
+
+
+# from numpy.linalg import eig
+# values, vectors = eig(covs)
+# print('values: ', values)
+# print('eigen vector: ', vectors)
+
+###################################################################
+# solves the QP, where x is the allocation of the portfolio:
+# minimize   x'Px + q'x
+# subject to Gx <= h
+#            Ax == b
+#
+# Input:  n       - # of assets
+#         avg_ret - nx1 matrix of average returns
+#         covs    - nxn matrix of return covariance
+#         r_min   - the minimum expected return that you'd
+#                   like to achieve
+# Output: sol - cvxopt solution object
+def optimize_portfolio(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	G = cvxopt.matrix(numpy.concatenate((
+		-numpy.transpose(numpy.array(avg_ret)),
+		-numpy.identity(n)), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		-numpy.ones((1, 1))*r_min,
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	A = cvxopt.matrix(1.0, (1, n))
+	b = cvxopt.matrix(1.0)
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+
+# ### setup the parameters
+# symbols = ['GOOG', 'AIMC', 'CE', 'BH', 'AHGP', 'AB', 'HLS', 'BKH', 'LUV']
+# # pull data from this date range
+# start   = '1/1/2010'
+# end     = '1/1/2014'
+# n       = len(symbols)
+# # average yearly return for each stock
+# avg_ret = matrix(map(lambda s: stocks.avg_return(s, start, end, 'y'), symbols))
+# # covariance of asset returns
+# covs    = matrix(numpy.array(stocks.cov_matrix(symbols, start, end, 'y')))
+# # minimum expected return threshold
+
+### solve
+
+P = cvxopt.matrix(covs)
+returns = []
+risks = []
+portfolios = []
+df = pd.DataFrame()
+columns = ['w_{}'.format(x) for x in range(1, n + 1)] + ['risk', 'return']
+
+xStep = 0.001   #0.001
+for delta_r in numpy.arange(r_min2, r_max2, xStep):
+	print('delta_r: ', delta_r)
+	w = optimize_portfolio(n, avg_ret, covs, delta_r)['x']
+	print('w: ', w)
+	print('w.T', w.T)
+	w2 = numpy.matrix(w.T)
+	print('w2.T', w2)
+	return2 = (w.T * avg_ret)[0]
+	risk2 = numpy.asscalar(numpy.sqrt(w.T * P * w))
+	print('return2: ', return2)
+	print('risk2: ', risk2)
+
+	returns.append(return2)
+	risks.append(risk2)
+
+	w2 = numpy.insert(w2, w2.size, [risk2, return2])
+	print('w2:', w2)
+	df = df.append(pd.DataFrame(w2, columns=[columns]), ignore_index=True)
+
+print('df_portfolios: \n', df)
+# print('df_portfolios: \n', df.head())
+# print('df_portfolios: \n', df.tail())
+
+df.to_csv(xDir + 'xOptimalPortfolio_equity_bond_SI.txt')
+
+ax.plot(risks, returns,color='blue',label='Equity/Bond/SI')
+import matplotlib.ticker as mtick
+#plt.axis()
+
+#xStock_scater = plt.scatter(std_vec[0], avg_ret[0], marker='x', color='red',label='Stock')	#stock
+#xBond_scatter = plt.scatter(std_vec[1], avg_ret[1], marker='*', color='green')	#bond
+if xSI_indicator:
+	if xCash:
+		xSI_scatter = plt.scatter(std_vec[2], avg_ret[2], marker='X', color='black',lable='SI')  # SI
+		xCash_scatter = plt.scatter(std_vec[3], avg_ret[3], marker='+', color='blue',label='Cash')  # cash
+	else:
+		xSI_scatter = plt.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+else:
+	if xCash:
+		xCash_scatter = plt.scatter(std_vec[2], avg_ret[2], marker='+', color='blue',label='Cash')  # cash
+	else:
+		print('nothing here')
+#plt.show()
+#plt.show(block=False)
+#plt.interactive(False)
+#plt.show(block=True)
+#plt.interactive(False)
+############################
+############# CASE 3 : THIS HAS 15% cap on SI WEIGHT!!! ###########################
+############################ EQUITY, BOND ONLY AND SI #################
+xSI_indicator = True
+if (xSI_indicator):
+	xRtns = xSPXT[['SPXT_rtn', 'BondTR_rtn', 'SI_rtn']]
+else:
+	xRtns = xSPXT[['SPXT_rtn', 'BondTR_rtn']]
+
+xCash = False
+if xCash:
+	xRtns['cash_rtn'] = 0.025 / 252
+
+#WKPRICE['rtn_w'] = WKPRICE.groupby('CUSIP')['PRICE'].pct_change()
+#WKPRICE['std_w'] = WKPRICE.groupby('CUSIP')['rtn_w'].apply(pd.rolling_std,window=52*2,min_periods=26)
+#WKPRICE.rename(columns={'DATE':'TueDATE'},inplace=True)
+
+print(xSPXT.head())
+print(xRtns.head())
+print(xRtns.tail())
+
+std_vec = cvxopt.matrix(xRtns.std(axis=0)) * numpy.sqrt(252)
+################
+##std_vec[2] = 0.06
+#############
+print('daily obs:\n', xRtns.count(axis=0))
+print('daily mean:\n', xRtns.mean(axis=0))
+print('daily Std:\n', xRtns.std(axis=0))
+print('correlation:\n', xRtns.corr())
+print('covariance:\n', xRtns.cov())
+print(xRtns.describe())
+
+#A = xRtns.values
+print('xRtns: ', xRtns.head())
+##print('A: ', A)
+covs = xRtns.cov() * (252 ^ 2)
+print('covs: ', covs)
+
+covs = covs.values
+print('covs: ', covs)
+
+corr = xRtns.corr()
+corr = corr.values
+
+################ alternative way to calculate covs ########
+xL = [std_vec[0],std_vec[1],std_vec[2]]
+xDiag_std = np.diag(xL)
+#covs = std_vec * corr * std_vec.T
+covs_2 = cvxopt.matrix(xDiag_std) * cvxopt.matrix(corr) * cvxopt.matrix(xDiag_std)
+### note:  this calculation is slightly different from the
+##################
+
+avg_ret = cvxopt.matrix(xRtns.mean(axis=0))    #.T
+avg_ret = avg_ret * 252	#annualized
+print('avg_ret: ', avg_ret)
+######### testing #########
+###avg_ret[2] = avg_ret[2] / 3
+##########################
+
+n = len(avg_ret)
+print('n = ', n)
+r_min2 = min(avg_ret)
+print('r_min2 = ', r_min2)
+
+r_max2 = max(avg_ret)
+print('r_max2 = ', r_max2)
+
+
+# from numpy.linalg import eig
+# values, vectors = eig(covs)
+# print('values: ', values)
+# print('eigen vector: ', vectors)
+
+###################################################################
+# solves the QP, where x is the allocation of the portfolio:
+# minimize   x'Px + q'x
+# subject to Gx <= h
+#            Ax == b
+#
+# Input:  n       - # of assets
+#         avg_ret - nx1 matrix of average returns
+#         covs    - nxn matrix of return covariance
+#         r_min   - the minimum expected return that you'd
+#                   like to achieve
+# Output: sol - cvxopt solution object
+def optimize_portfolio(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	G = cvxopt.matrix(numpy.concatenate((
+		-numpy.transpose(numpy.array(avg_ret)),
+		-numpy.identity(n),
+		), 0))
+	v = (G[G.size[0] - 1, :])
+	v[0, v.size[1] - 1] = 1
+	G = cvxopt.matrix(numpy.concatenate((G, v), 0))
+
+	h = cvxopt.matrix(numpy.concatenate((
+		-numpy.ones((1, 1))*r_min,
+		numpy.zeros((n, 1)),
+		numpy.ones((1, 1)) * 0.15), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	A = cvxopt.matrix(1.0, (1, n))
+	b = cvxopt.matrix(1.0)
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+
+# ### setup the parameters
+# symbols = ['GOOG', 'AIMC', 'CE', 'BH', 'AHGP', 'AB', 'HLS', 'BKH', 'LUV']
+# # pull data from this date range
+# start   = '1/1/2010'
+# end     = '1/1/2014'
+# n       = len(symbols)
+# # average yearly return for each stock
+# avg_ret = matrix(map(lambda s: stocks.avg_return(s, start, end, 'y'), symbols))
+# # covariance of asset returns
+# covs    = matrix(numpy.array(stocks.cov_matrix(symbols, start, end, 'y')))
+# # minimum expected return threshold
+
+### solve
+
+P = cvxopt.matrix(covs)
+returns = []
+risks = []
+portfolios = []
+df = pd.DataFrame()
+columns = ['w_{}'.format(x) for x in range(1, n + 1)] + ['risk', 'return']
+
+xStep = 0.001   #0.001
+for delta_r in numpy.arange(r_min2, r_max2, xStep):
+	print('delta_r: ', delta_r)
+	w = optimize_portfolio(n, avg_ret, covs, delta_r)['x']
+	print('w: ', w)
+	print('w.T', w.T)
+	w2 = numpy.matrix(w.T)
+	print('w2.T', w2)
+	return2 = (w.T * avg_ret)[0]
+	risk2 = numpy.asscalar(numpy.sqrt(w.T * P * w))
+	print('return2: ', return2)
+	print('risk2: ', risk2)
+
+	returns.append(return2)
+	risks.append(risk2)
+
+	w2 = numpy.insert(w2, w2.size, [risk2, return2])
+	print('w2:', w2)
+	df = df.append(pd.DataFrame(w2, columns=[columns]), ignore_index=True)
+
+print('df_portfolios: \n', df)
+# print('df_portfolios: \n', df.head())
+# print('df_portfolios: \n', df.tail())
+
+df.to_csv(xDir + 'xOptimalPortfolio_equity_bond_SI_15pct.txt')
+
+import matplotlib.ticker as mtick
+
+#fig = plt.figure(1)
+#fig.add_subplot(111)
+#ax = fig.add_subplot(111)
+
+#ax.plot(perc, data)
+
+fmt = '%.0f%%' # Format you want the ticks, e.g. '40%'
+##xticks = mtick.FormatStrFormatter(fmt)
+xticks = mtick.FuncFormatter("{:.0%}".format)
+ax.xaxis.set_major_formatter(xticks)
+ax.yaxis.set_major_formatter(xticks)
+
+#plt.ylabel('mean')
+#plt.xlabel('std')
+#plt.title('Efficient Frontier xxxx with underlying index ' + xUnderlier)
+#plt.plot(risks, returns, 'y-o')
+ax.plot(risks, returns,color='black',label='Equity/Bond/SI with max 15% on SI')
+import matplotlib.ticker as mtick
+#plt.axis()
+
+#xStock_scater = plt.scatter(std_vec[0], avg_ret[0], marker='x', color='red')	#stock
+#xBond_scatter = plt.scatter(std_vec[1], avg_ret[1], marker='*', color='green')	#bond
+# if xSI_indicator:
+# 	if xCash:
+# 		xSI_scatter = plt.scatter(std_vec[2], avg_ret[2], marker='X', color='black', label='SI')  # SI
+# 		xCash_scatter = plt.scatter(std_vec[3], avg_ret[3], marker='+', color='blue',label='Cash')  # cash
+# 	else:
+# 		#print('hererrrrrrrrr')
+# 		xSI_scatter = plt.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+# else:
+# 	if xCash:
+# 		xCash_scatter = plt.scatter(std_vec[2], avg_ret[2], marker='+', color='blue',label='Cash')  # cash
+# 	else:
+# 		print('nothing here')
+#plt.show()
+#plt.show(block=False)
+#plt.interactive(False)
+#plt.show(block=True)
+#plt.interactive(False)
+############################
+plt.grid(which='both')
+plt.legend(loc='best', ncol=2,facecolor='white')
+plt.xlim(xmin=0)
+plt.ylim(ymin=0.02)
+
+plt.savefig(xDir + 'EfficientFrontier_'+xSubText+'.png')
+plt.show()
+################################
+############################ EQUITY AND BOND ONLY TERM RETURNS #################
+xSI_indicator = False
+if (xSI_indicator):
+	xRtns = xSPXT[['SPXT_rtn', 'BondTR_rtn', 'SI_rtn']]
+else:
+	#xRtns = xSPXT[['SPXT_rtn', 'BondTR_rtn']]
+	xRtns = xSPXT[['SPXT_term_rtn', 'BondTR_term_rtn']]
+	#xRtns = xSPXT[['SPX_term_rtn', 'BondTR_term_rtn']]
+
+xCash = False
+if xCash:
+	xRtns['cash_rtn'] = 0.025 / 252
+
+#WKPRICE['rtn_w'] = WKPRICE.groupby('CUSIP')['PRICE'].pct_change()
+#WKPRICE['std_w'] = WKPRICE.groupby('CUSIP')['rtn_w'].apply(pd.rolling_std,window=52*2,min_periods=26)
+#WKPRICE.rename(columns={'DATE':'TueDATE'},inplace=True)
+
+print(xSPXT.head())
+print(xRtns.head())
+print(xRtns.tail())
+
+std_vec = xRtns.std(axis=0) * numpy.sqrt(252)
+
+print('daily obs:\n', xRtns.count(axis=0))
+print('daily mean:\n', xRtns.mean(axis=0))
+print('daily Std:\n', xRtns.std(axis=0))
+print('correlation:\n', xRtns.corr())
+print('covariance:\n', xRtns.cov())
+print(xRtns.describe())
+
+#A = xRtns.values
+print('xRtns: ', xRtns.head())
+##print('A: ', A)
+covs = xRtns.cov() * (252 ^ 2)
+print('covs: ', covs)
+
+covs = covs.values
+
+print('covs: ', covs)
+avg_ret = cvxopt.matrix(xRtns.mean(axis=0))    #.T
+avg_ret = avg_ret * 252	#annualized
+print('avg_ret: ', avg_ret)
+#########
+############
+
+n = len(avg_ret)
+print('n = ', n)
+r_min2 = min(avg_ret)
+print('r_min2 = ', r_min2)
+
+r_max2 = max(avg_ret)
+print('r_max2 = ', r_max2)
+
+
+# from numpy.linalg import eig
+# values, vectors = eig(covs)
+# print('values: ', values)
+# print('eigen vector: ', vectors)
+
+###################################################################
+# solves the QP, where x is the allocation of the portfolio:
+# minimize   x'Px + q'x
+# subject to Gx <= h
+#            Ax == b
+#
+# Input:  n       - # of assets
+#         avg_ret - nx1 matrix of average returns
+#         covs    - nxn matrix of return covariance
+#         r_min   - the minimum expected return that you'd
+#                   like to achieve
+# Output: sol - cvxopt solution object
+def optimize_portfolio(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	G = cvxopt.matrix(numpy.concatenate((
+		-numpy.transpose(numpy.array(avg_ret)),
+		-numpy.identity(n)), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		-numpy.ones((1, 1))*r_min,
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	A = cvxopt.matrix(1.0, (1, n))
+	b = cvxopt.matrix(1.0)
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+
+# ### setup the parameters
+# symbols = ['GOOG', 'AIMC', 'CE', 'BH', 'AHGP', 'AB', 'HLS', 'BKH', 'LUV']
+# # pull data from this date range
+# start   = '1/1/2010'
+# end     = '1/1/2014'
+# n       = len(symbols)
+# # average yearly return for each stock
+# avg_ret = matrix(map(lambda s: stocks.avg_return(s, start, end, 'y'), symbols))
+# # covariance of asset returns
+# covs    = matrix(numpy.array(stocks.cov_matrix(symbols, start, end, 'y')))
+# # minimum expected return threshold
+
+### solve
+
+P = cvxopt.matrix(covs)
+returns = []
+risks = []
+portfolios = []
+df = pd.DataFrame()
+columns = ['w_{}'.format(x) for x in range(1, n + 1)] + ['risk', 'return']
+
+xStep = 0.001   #0.001
+for delta_r in numpy.arange(r_min2, r_max2, xStep):
+	print('delta_r: ', delta_r)
+	w = optimize_portfolio(n, avg_ret, covs, delta_r)['x']
+	print('w: ', w)
+	print('w.T', w.T)
+	w2 = numpy.matrix(w.T)
+	print('w2.T', w2)
+	return2 = (w.T * avg_ret)[0]
+	risk2 = numpy.asscalar(numpy.sqrt(w.T * P * w))
+	print('return2: ', return2)
+	print('risk2: ', risk2)
+
+	returns.append(return2)
+	risks.append(risk2)
+
+	w2 = numpy.insert(w2, w2.size, [risk2, return2])
+	print('w2:', w2)
+	df = df.append(pd.DataFrame(w2, columns=[columns]), ignore_index=True)
+
+print('df_portfolios: \n', df)
+# print('df_portfolios: \n', df.head())
+# print('df_portfolios: \n', df.tail())
+
+df.to_csv(xDir + 'xOptimalPortfolio_ALL_CM.txt')
+
+#import matplotlib as plt2
+import matplotlib.pyplot as plt2
+
+#import matplotlib.pyplot as plt2
+
+fig, ax = plt2.subplots()
+ax.plot(risks, returns, label='Equity/Bond')
+fig.suptitle('Efficient Frontier (all based on CM) with underlying index ' + xUnderlier, fontsize=12)
+ax.set_xlabel('Std', fontsize=10)
+ax.set_ylabel('Mean', fontsize=10)
+
+#plt2.ylabel('mean')
+#plt2.xlabel('std')
+#plt2.title('Efficient Frontier x (all based on CM) with underlying index ' + xUnderlier)
+#plt2.plot(risks, returns, 'y-o')
+#plt2.plot(risks, returns)
+import matplotlib.ticker as mtick
+#plt2.axis()
+
+xStock_scater = plt2.scatter(std_vec[0], avg_ret[0], marker='x', color='red',label='stock')	#stock
+xBond_scatter = plt2.scatter(std_vec[1], avg_ret[1], marker='*', color='green',label='bond')	#bond
+if xSI_indicator:
+	if xCash:
+		xSI_scatter = plt2.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+		xCash_scatter = plt2.scatter(std_vec[3], avg_ret[3], marker='+', color='blue',label='cash')  # cash
+	else:
+		#print('hererrrrrrrrr')
+		xSI_scatter = plt2.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+else:
+	if xCash:
+		xCash_scatter = plt2.scatter(std_vec[2], avg_ret[2], marker='+', color='blue',label='cash')  # cash
+	else:
+		print('nothing here')
+#################################################
+############################ EQUITY, BOND AND SI TERM RETURNS #################
+xSI_indicator = True
+if (xSI_indicator):
+	#xRtns = xSPXT[['SPXT_rtn', 'BondTR_rtn', 'SI_rtn']]
+	xRtns = xSPXT[['SPXT_term_rtn', 'BondTR_term_rtn', 'SI_rtn']]
+	#xRtns = xSPXT[['SPX_term_rtn', 'BondTR_term_rtn', 'SI_rtn']]
+else:
+	#xRtns = xSPXT[['SPXT_rtn', 'BondTR_rtn']]
+	xRtns = xSPXT[['SPXT_term_rtn', 'BondTR_term_rtn']]
+
+xCash = False
+if xCash:
+	xRtns['cash_rtn'] = 0.025 / 252
+
+#WKPRICE['rtn_w'] = WKPRICE.groupby('CUSIP')['PRICE'].pct_change()
+#WKPRICE['std_w'] = WKPRICE.groupby('CUSIP')['rtn_w'].apply(pd.rolling_std,window=52*2,min_periods=26)
+#WKPRICE.rename(columns={'DATE':'TueDATE'},inplace=True)
+
+print(xSPXT.head())
+print(xRtns.head())
+print(xRtns.tail())
+
+std_vec = xRtns.std(axis=0) * numpy.sqrt(252)
+
+print('daily obs:\n', xRtns.count(axis=0))
+print('daily mean:\n', xRtns.mean(axis=0))
+print('daily Std:\n', xRtns.std(axis=0))
+print('correlation:\n', xRtns.corr())
+print('covariance:\n', xRtns.cov())
+print(xRtns.describe())
+
+#A = xRtns.values
+print('xRtns: ', xRtns.head())
+##print('A: ', A)
+covs = xRtns.cov() * (252 ^ 2)
+print('covs: ', covs)
+
+covs = covs.values
+
+print('covs: ', covs)
+avg_ret = cvxopt.matrix(xRtns.mean(axis=0))    #.T
+avg_ret = avg_ret * 252	#annualized
+print('avg_ret: ', avg_ret)
+#########
+############
+
+n = len(avg_ret)
+print('n = ', n)
+r_min2 = min(avg_ret)
+print('r_min2 = ', r_min2)
+
+r_max2 = max(avg_ret)
+print('r_max2 = ', r_max2)
+
+
+# from numpy.linalg import eig
+# values, vectors = eig(covs)
+# print('values: ', values)
+# print('eigen vector: ', vectors)
+
+###################################################################
+# solves the QP, where x is the allocation of the portfolio:
+# minimize   x'Px + q'x
+# subject to Gx <= h
+#            Ax == b
+#
+# Input:  n       - # of assets
+#         avg_ret - nx1 matrix of average returns
+#         covs    - nxn matrix of return covariance
+#         r_min   - the minimum expected return that you'd
+#                   like to achieve
+# Output: sol - cvxopt solution object
+def optimize_portfolio(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	G = cvxopt.matrix(numpy.concatenate((
+		-numpy.transpose(numpy.array(avg_ret)),
+		-numpy.identity(n)), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		-numpy.ones((1, 1))*r_min,
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	A = cvxopt.matrix(1.0, (1, n))
+	b = cvxopt.matrix(1.0)
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+
+# ### setup the parameters
+# symbols = ['GOOG', 'AIMC', 'CE', 'BH', 'AHGP', 'AB', 'HLS', 'BKH', 'LUV']
+# # pull data from this date range
+# start   = '1/1/2010'
+# end     = '1/1/2014'
+# n       = len(symbols)
+# # average yearly return for each stock
+# avg_ret = matrix(map(lambda s: stocks.avg_return(s, start, end, 'y'), symbols))
+# # covariance of asset returns
+# covs    = matrix(numpy.array(stocks.cov_matrix(symbols, start, end, 'y')))
+# # minimum expected return threshold
+
+### solve
+
+P = cvxopt.matrix(covs)
+returns = []
+risks = []
+portfolios = []
+df = pd.DataFrame()
+columns = ['w_{}'.format(x) for x in range(1, n + 1)] + ['risk', 'return']
+
+xStep = 0.001   #0.001
+for delta_r in numpy.arange(r_min2, r_max2, xStep):
+	print('delta_r: ', delta_r)
+	w = optimize_portfolio(n, avg_ret, covs, delta_r)['x']
+	print('w: ', w)
+	print('w.T', w.T)
+	w2 = numpy.matrix(w.T)
+	print('w2.T', w2)
+	return2 = (w.T * avg_ret)[0]
+	risk2 = numpy.asscalar(numpy.sqrt(w.T * P * w))
+	print('return2: ', return2)
+	print('risk2: ', risk2)
+
+	returns.append(return2)
+	risks.append(risk2)
+
+	w2 = numpy.insert(w2, w2.size, [risk2, return2])
+	print('w2:', w2)
+	df = df.append(pd.DataFrame(w2, columns=[columns]), ignore_index=True)
+
+print('df_portfolios: \n', df)
+# print('df_portfolios: \n', df.head())
+# print('df_portfolios: \n', df.tail())
+
+df.to_csv(xDir + 'xOptimalPortfolio_term.txt')
+
+#import matplotlib as plt2
+#import matplotlib.pyplot as plt2
+
+#fig, ax = plt2.subplots()
+ax.plot(risks, returns, label='Equity/Bond/SI')
+#fig.suptitle('Efficient Frontier (all based on CM) with underlying index ' + xUnderlier, fontsize=12)
+#ax.set_xlabel('Std', fontsize=10)
+#ax.set_ylabel('Mean', fontsize=10)
+
+# # title and labels, setting initial sizes
+# fig.suptitle('test title', fontsize=12)
+# ax.set_xlabel('xlabel', fontsize=10)
+# ax.set_ylabel('ylabel', fontsize='medium')   # relative to plt.rcParams['font.size']
+#
+# # setting label sizes after creation
+# ax.xaxis.label.set_size(20)
+# plt.draw()
+# plt.show()
+
+#plt2.ylabel('mean')
+#plt2.xlabel('std')
+#plt2.title('Efficient Frontier xx (all based on CM) with underlying index ' + xUnderlier)
+#plt2.plot(risks, returns, 'y-o')
+#plt2.plot(risks, returns)
+import matplotlib.ticker as mtick
+#plt2.axis()
+
+#xStock_scater = ax.scatter(std_vec[0], avg_ret[0], marker='x', color='red', label='stock')	#stock
+#xBond_scatter = ax.scatter(std_vec[1], avg_ret[1], marker='*', color='green',label='bond')	#bond
+if xSI_indicator:
+	if xCash:
+		xSI_scatter = ax.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+		xCash_scatter = plt2.scatter(std_vec[3], avg_ret[3], marker='+', color='blue',label='cash')  # cash
+	else:
+		#print('hererrrrrrrrr')
+		xSI_scatter = ax.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+else:
+	if xCash:
+		xCash_scatter = plt2.scatter(std_vec[2], avg_ret[2], marker='+', color='blue',label='cash')  # cash
+	else:
+		print('nothing')
+
+# plt2.xlim(xmin=0)
+# plt2.ylim(ymin=0.02)
+
+plt2.legend(loc='best')
+
+plt2.show()
+
+################################# the following are efficient frontiers with 2/4//6 years rolling returns and std #######
+############################ EQUITY AND BOND ONLY #################
+import matplotlib.pyplot as plt3
+xSI_indicator = False
+if (xSI_indicator):
+	xRtns = xSPXT[['SPXT_rtn_term', 'BondTR_rtn_term', 'SI_rtn_term']]
+else:
+	xRtns = xSPXT[['SPXT_rtn_term', 'BondTR_rtn_term']]
+
+xCash = False
+if xCash:
+	xRtns['cash_rtn'] = 0.025 / 252
+
+#WKPRICE['rtn_w'] = WKPRICE.groupby('CUSIP')['PRICE'].pct_change()
+#WKPRICE['std_w'] = WKPRICE.groupby('CUSIP')['rtn_w'].apply(pd.rolling_std,window=52*2,min_periods=26)
+#WKPRICE.rename(columns={'DATE':'TueDATE'},inplace=True)
+
+print(xSPXT.head())
+print(xRtns.head())
+print(xRtns.tail())
+
+std_vec = xRtns.std(axis=0)  ############# * numpy.sqrt(252)
+
+print('daily obs:\n', xRtns.count(axis=0))
+print('daily mean:\n', xRtns.mean(axis=0))
+print('daily Std:\n', xRtns.std(axis=0))
+print('correlation:\n', xRtns.corr())
+print('covariance:\n', xRtns.cov())
+print(xRtns.describe())
+
+#A = xRtns.values
+print('xRtns: ', xRtns.head())
+##print('A: ', A)
+covs = xRtns.cov()  ########## * (252 ^ 2)
+print('covs: ', covs)
+
+covs = covs.values
+
+print('covs: ', covs)
+avg_ret = cvxopt.matrix(xRtns.mean(axis=0))    #.T
+avg_ret = avg_ret ################ * 252	#annualized
+print('avg_ret: ', avg_ret)
+#########
+############
+
+n = len(avg_ret)
+print('n = ', n)
+r_min2 = min(avg_ret)
+print('r_min2 = ', r_min2)
+
+r_max2 = max(avg_ret)
+print('r_max2 = ', r_max2)
+
+# from numpy.linalg import eig
+# values, vectors = eig(covs)
+# print('values: ', values)
+# print('eigen vector: ', vectors)
+
+###################################################################
+# solves the QP, where x is the allocation of the portfolio:
+# minimize   x'Px + q'x
+# subject to Gx <= h
+#            Ax == b
+#
+# Input:  n       - # of assets
+#         avg_ret - nx1 matrix of average returns
+#         covs    - nxn matrix of return covariance
+#         r_min   - the minimum expected return that you'd
+#                   like to achieve
+# Output: sol - cvxopt solution object
+def optimize_portfolio(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	G = cvxopt.matrix(numpy.concatenate((
+		-numpy.transpose(numpy.array(avg_ret)),
+		-numpy.identity(n)), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		-numpy.ones((1, 1))*r_min,
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	A = cvxopt.matrix(1.0, (1, n))
+	b = cvxopt.matrix(1.0)
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+
+# ### setup the parameters
+# symbols = ['GOOG', 'AIMC', 'CE', 'BH', 'AHGP', 'AB', 'HLS', 'BKH', 'LUV']
+# # pull data from this date range
+# start   = '1/1/2010'
+# end     = '1/1/2014'
+# n       = len(symbols)
+# # average yearly return for each stock
+# avg_ret = matrix(map(lambda s: stocks.avg_return(s, start, end, 'y'), symbols))
+# # covariance of asset returns
+# covs    = matrix(numpy.array(stocks.cov_matrix(symbols, start, end, 'y')))
+# # minimum expected return threshold
+
+### solve
+
+P = cvxopt.matrix(covs)
+returns = []
+risks = []
+portfolios = []
+df = pd.DataFrame()
+columns = ['w_{}'.format(x) for x in range(1, n + 1)] + ['risk', 'return']
+
+xStep = (r_max2 - r_min2) / 100  ###############0.001   #0.001
+for delta_r in numpy.arange(r_min2, r_max2, xStep):
+	print('delta_r: ', delta_r)
+	w = optimize_portfolio(n, avg_ret, covs, delta_r)['x']
+	print('w: ', w)
+	print('w.T', w.T)
+	w2 = numpy.matrix(w.T)
+	print('w2.T', w2)
+	return2 = (w.T * avg_ret)[0]
+	risk2 = numpy.asscalar(numpy.sqrt(w.T * P * w))
+	print('return2: ', return2)
+	print('risk2: ', risk2)
+
+	returns.append(return2)
+	risks.append(risk2)
+
+	w2 = numpy.insert(w2, w2.size, [risk2, return2])
+	print('w2:', w2)
+	df = df.append(pd.DataFrame(w2, columns=[columns]), ignore_index=True)
+
+print('df_portfolios: \n', df)
+# print('df_portfolios: \n', df.head())
+# print('df_portfolios: \n', df.tail())
+
+df.to_csv(xDir + 'xOptimalPortfolio_Equity_Bond_term.txt')
+
+fig3, ax3 = plt3.subplots()
+ax3.plot(risks, returns, color='red', label='Equity/Bond')
+fig3.suptitle('Efficient Frontiers (term) for ' + xSubText, fontsize=16,y=0.95)
+ax3.set_xlabel('Risk ('+xTerm+')', fontsize=10)
+ax3.set_ylabel('Return ('+xTerm+')', fontsize=10)
+
+# plt.ylabel('mean')
+# plt.xlabel('std')
+# plt.title('Efficient Frontier xx with underlying index ' + xUnderlier)
+# #plt.plot(risks, returns, 'y-o')
+# plt.plot(risks, returns, color='red',label='Equity/Bond')
+# plt.legend(loc='lower right')
+# import matplotlib.ticker as mtick
+# plt.axis()
+
+xStock_scater = plt3.scatter(std_vec[0], avg_ret[0], marker='x', color='red',label='Stock')	#stock
+xBond_scatter = plt3.scatter(std_vec[1], avg_ret[1], marker='*', color='green',label='Bond')	#bond
+if xSI_indicator:
+	if xCash:
+		xSI_scatter = plt3.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+		xCash_scatter = plt3.scatter(std_vec[3], avg_ret[3], marker='+', color='blue',label='Cash')  # cash
+	else:
+		xSI_scatter = plt3.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+else:
+	if xCash:
+		xCash_scatter = plt3.scatter(std_vec[2], avg_ret[2], marker='+', color='blue',label='Cash')  # cash
+	else:
+		print ('nothing here')
+#plt.show()
+#plt.show(block=False)
+#plt.interactive(False)
+#plt.show(block=True)
+#plt.interactive(False)
+############################
+
+##plt.xlim(xmin=0)
+##plt.ylim(ymin=0.02)
+
+##plt.show()
+############# CASE 2 ###########################
+############################ EQUITY, BOND ONLY AND SI #################
+xSI_indicator = True
+if (xSI_indicator):
+	xRtns = xSPXT[['SPXT_rtn_term', 'BondTR_rtn_term', 'SI_rtn_term']]
+else:
+	xRtns = xSPXT[['SPXT_rtn_term', 'BondTR_rtn_term']]
+
+xCash = False
+if xCash:
+	xRtns['cash_rtn'] = 0.025 / 252
+
+#WKPRICE['rtn_w'] = WKPRICE.groupby('CUSIP')['PRICE'].pct_change()
+#WKPRICE['std_w'] = WKPRICE.groupby('CUSIP')['rtn_w'].apply(pd.rolling_std,window=52*2,min_periods=26)
+#WKPRICE.rename(columns={'DATE':'TueDATE'},inplace=True)
+
+print(xSPXT.head())
+print(xRtns.head())
+print(xRtns.tail())
+
+std_vec = cvxopt.matrix(xRtns.std(axis=0)) ################ * numpy.sqrt(252)
+################
+##std_vec[2] = 0.06
+#############
+print('daily obs:\n', xRtns.count(axis=0))
+print('daily mean:\n', xRtns.mean(axis=0))
+print('daily Std:\n', xRtns.std(axis=0))
+print('correlation:\n', xRtns.corr())
+print('covariance:\n', xRtns.cov())
+print(xRtns.describe())
+
+#A = xRtns.values
+print('xRtns: ', xRtns.head())
+##print('A: ', A)
+covs = xRtns.cov() ############### * (252 ^ 2)
+print('covs: ', covs)
+########## debug testing #########
+#covs['SI_rtn_term'][0] = covs['SI_rtn_term'][0]*(-1)
+#covs['SPXT_rtn_term'][2] = covs['SPXT_rtn_term'][2]*(-1)
+##########################
+covs = covs.values
+print('covs: ', covs)
+
+corr = xRtns.corr()
+corr = corr.values
+
+################ alternative way to calculate covs ########
+xL = [std_vec[0],std_vec[1],std_vec[2]]
+xDiag_std = np.diag(xL)
+#covs = std_vec * corr * std_vec.T
+covs_2 = cvxopt.matrix(xDiag_std) * cvxopt.matrix(corr) * cvxopt.matrix(xDiag_std)
+### note:  this calculation is slightly different from the
+###########################################################
+
+avg_ret = cvxopt.matrix(xRtns.mean(axis=0))    #.T
+avg_ret = avg_ret ################# * 252	#annualized
+print('avg_ret: ', avg_ret)
+######### testing debug #########
+####avg_ret[2] = avg_ret[2] * 1.2
+##########################
+
+n = len(avg_ret)
+print('n = ', n)
+r_min2 = min(avg_ret)
+print('r_min2 = ', r_min2)
+
+r_max2 = max(avg_ret)
+print('r_max2 = ', r_max2)
+
+# from numpy.linalg import eig
+# values, vectors = eig(covs)
+# print('values: ', values)
+# print('eigen vector: ', vectors)
+
+###################################################################
+# solves the QP, where x is the allocation of the portfolio:
+# minimize   x'Px + q'x
+# subject to Gx <= h
+#            Ax == b
+#
+# Input:  n       - # of assets
+#         avg_ret - nx1 matrix of average returns
+#         covs    - nxn matrix of return covariance
+#         r_min   - the minimum expected return that you'd
+#                   like to achieve
+# Output: sol - cvxopt solution object
+def optimize_portfolio(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	G = cvxopt.matrix(numpy.concatenate((
+		-numpy.transpose(numpy.array(avg_ret)),
+		-numpy.identity(n)), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		-numpy.ones((1, 1))*r_min,
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	A = cvxopt.matrix(1.0, (1, n))
+	b = cvxopt.matrix(1.0)
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+
+# ### setup the parameters
+# symbols = ['GOOG', 'AIMC', 'CE', 'BH', 'AHGP', 'AB', 'HLS', 'BKH', 'LUV']
+# # pull data from this date range
+# start   = '1/1/2010'
+# end     = '1/1/2014'
+# n       = len(symbols)
+# # average yearly return for each stock
+# avg_ret = matrix(map(lambda s: stocks.avg_return(s, start, end, 'y'), symbols))
+# # covariance of asset returns
+# covs    = matrix(numpy.array(stocks.cov_matrix(symbols, start, end, 'y')))
+# # minimum expected return threshold
+
+### solve
+
+P = cvxopt.matrix(covs)
+returns = []
+risks = []
+portfolios = []
+df = pd.DataFrame()
+columns = ['w_{}'.format(x) for x in range(1, n + 1)] + ['risk', 'return']
+
+xStep = (r_max2 - r_min2) / 100 ############0.001   #0.001
+for delta_r in numpy.arange(r_min2, r_max2, xStep):
+	print('delta_r: ', delta_r)
+	w = optimize_portfolio(n, avg_ret, covs, delta_r)['x']
+	print('w: ', w)
+	print('w.T', w.T)
+	w2 = numpy.matrix(w.T)
+	print('w2.T', w2)
+	return2 = (w.T * avg_ret)[0]
+	risk2 = numpy.asscalar(numpy.sqrt(w.T * P * w))
+	print('return2: ', return2)
+	print('risk2: ', risk2)
+
+	returns.append(return2)
+	risks.append(risk2)
+
+	w2 = numpy.insert(w2, w2.size, [risk2, return2])
+	print('w2:', w2)
+	df = df.append(pd.DataFrame(w2, columns=[columns]), ignore_index=True)
+
+print('df_portfolios: \n', df)
+# print('df_portfolios: \n', df.head())
+# print('df_portfolios: \n', df.tail())
+
+df.to_csv(xDir + 'xOptimalPortfolio_equity_bond_SI_term.txt')
+
+ax3.plot(risks, returns,color='blue',label='Equity/Bond/SI')
+import matplotlib.ticker as mtick
+#plt.axis()
+
+#xStock_scater = plt.scatter(std_vec[0], avg_ret[0], marker='x', color='red',label='Stock')	#stock
+#xBond_scatter = plt.scatter(std_vec[1], avg_ret[1], marker='*', color='green')	#bond
+if xSI_indicator:
+	if xCash:
+		xSI_scatter = plt3.scatter(std_vec[2], avg_ret[2], marker='X', color='black',lable='SI')  # SI
+		xCash_scatter = plt3.scatter(std_vec[3], avg_ret[3], marker='+', color='blue',label='Cash')  # cash
+	else:
+		xSI_scatter = plt3.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+else:
+	if xCash:
+		xCash_scatter = plt3.scatter(std_vec[2], avg_ret[2], marker='+', color='blue',label='Cash')  # cash
+	else:
+		print('nothing here')
+#plt3.show()
+#plt.show(block=False)
+#plt.interactive(False)
+#plt.show(block=True)
+#plt.interactive(False)
+import matplotlib.ticker as mtick3
+
+#fig = plt.figure(1)
+#fig.add_subplot(111)
+#ax = fig.add_subplot(111)
+
+#ax.plot(perc, data)
+
+fmt = '%.0f%%' # Format you want the ticks, e.g. '40%'
+##xticks = mtick.FormatStrFormatter(fmt)
+xticks = mtick3.FuncFormatter("{:.0%}".format)
+ax3.xaxis.set_major_formatter(xticks)
+ax3.yaxis.set_major_formatter(xticks)
+
+plt3.grid(which='both')
+plt3.legend(loc='best', ncol=3,facecolor='white')
+plt3.xlim(xmin=0)
+plt3.ylim(ymin=0.02)
+
+plt3.savefig(xDir + 'EfficientFrontier_'+xSubText+'_term.png')
+plt3.show()
+############################
+
+##################### the following are efficient frontiers based on 1-YEAR returns for SPXT, BondTR and SI #######
+########## 1 year return for SI derived from 2/4/6 years return; 1-year returns for SPXT and BondTR from daily prices ###########
+############################ EQUITY AND BOND ONLY #################
+import matplotlib.pyplot as plt4
+xSI_indicator = False
+if (xSI_indicator):
+	xRtns = xSPXT[['SPXT_rtn_1_year', 'BondTR_rtn_1_year', 'SI_rtn_1_year']]
+else:
+	xRtns = xSPXT[['SPXT_rtn_1_year', 'BondTR_rtn_1_year']]
+
+xCash = False
+if xCash:
+	xRtns['cash_rtn'] = 0.025 / 252
+
+#WKPRICE['rtn_w'] = WKPRICE.groupby('CUSIP')['PRICE'].pct_change()
+#WKPRICE['std_w'] = WKPRICE.groupby('CUSIP')['rtn_w'].apply(pd.rolling_std,window=52*2,min_periods=26)
+#WKPRICE.rename(columns={'DATE':'TueDATE'},inplace=True)
+
+print(xSPXT.head())
+print(xRtns.head())
+print(xRtns.tail())
+
+std_vec = xRtns.std(axis=0)  ############# * numpy.sqrt(252)
+
+print('daily obs:\n', xRtns.count(axis=0))
+print('daily mean:\n', xRtns.mean(axis=0))
+print('daily Std:\n', xRtns.std(axis=0))
+print('correlation:\n', xRtns.corr())
+print('covariance:\n', xRtns.cov())
+print(xRtns.describe())
+
+#A = xRtns.values
+print('xRtns: ', xRtns.head())
+##print('A: ', A)
+covs = xRtns.cov()  ########## * (252 ^ 2)
+print('covs: ', covs)
+
+covs = covs.values
+
+print('covs: ', covs)
+avg_ret = cvxopt.matrix(xRtns.mean(axis=0))    #.T
+avg_ret = avg_ret ################ * 252	#annualized
+print('avg_ret: ', avg_ret)
+#########
+############
+
+n = len(avg_ret)
+print('n = ', n)
+r_min2 = min(avg_ret)
+print('r_min2 = ', r_min2)
+
+r_max2 = max(avg_ret)
+print('r_max2 = ', r_max2)
+
+# from numpy.linalg import eig
+# values, vectors = eig(covs)
+# print('values: ', values)
+# print('eigen vector: ', vectors)
+
+###################################################################
+# solves the QP, where x is the allocation of the portfolio:
+# minimize   x'Px + q'x
+# subject to Gx <= h
+#            Ax == b
+#
+# Input:  n       - # of assets
+#         avg_ret - nx1 matrix of average returns
+#         covs    - nxn matrix of return covariance
+#         r_min   - the minimum expected return that you'd
+#                   like to achieve
+# Output: sol - cvxopt solution object
+##########<=mmodified = R ################
+def optimize_portfolio_modified(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	#G = cvxopt.matrix(numpy.concatenate((
+	# 	-numpy.transpose(numpy.array(avg_ret)),
+	# 	-numpy.identity(n)), 0))
+	#G = cvxopt.matrix(numpy.concatenate((
+	#	-numpy.identity(n)), 0))
+	G = cvxopt.matrix(-np.diag(np.ones(n),0))
+	# h = cvxopt.matrix(numpy.concatenate((
+	# 	-numpy.ones((1, 1))*r_min,
+	# 	numpy.zeros((n, 1))), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	#-numpy.transpose(numpy.array(avg_ret)),
+	#A = cvxopt.matrix(1.0, (1, n))
+	A = cvxopt.matrix(numpy.concatenate((
+		numpy.transpose(numpy.array(avg_ret)),
+		cvxopt.matrix(1.0, (1, n)))))
+	#b = cvxopt.matrix(1.0)
+	b = cvxopt.matrix(numpy.concatenate((
+		numpy.ones((1, 1)) * r_min,
+		cvxopt.matrix(1.0))))
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+
+############## original version ##################
+def optimize_portfolio(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	G = cvxopt.matrix(numpy.concatenate((
+		-numpy.transpose(numpy.array(avg_ret)),
+		-numpy.identity(n)), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		-numpy.ones((1, 1))*r_min,
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	A = cvxopt.matrix(1.0, (1, n))
+	b = cvxopt.matrix(1.0)
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+###############################################
+# ### setup the parameters
+# symbols = ['GOOG', 'AIMC', 'CE', 'BH', 'AHGP', 'AB', 'HLS', 'BKH', 'LUV']
+# # pull data from this date range
+# start   = '1/1/2010'
+# end     = '1/1/2014'
+# n       = len(symbols)
+# # average yearly return for each stock
+# avg_ret = matrix(map(lambda s: stocks.avg_return(s, start, end, 'y'), symbols))
+# # covariance of asset returns
+# covs    = matrix(numpy.array(stocks.cov_matrix(symbols, start, end, 'y')))
+# # minimum expected return threshold
+
+### solve
+
+P = cvxopt.matrix(covs)
+returns = []
+risks = []
+portfolios = []
+df = pd.DataFrame()
+columns = ['w_{}'.format(x) for x in range(1, n + 1)] + ['risk', 'return']
+
+xStep = (r_max2 - r_min2) / 100  ###############0.001   #0.001
+for delta_r in numpy.arange(r_min2, r_max2, xStep):
+	print('delta_r: ', delta_r)
+	w = optimize_portfolio(n, avg_ret, covs, delta_r)['x']
+	print('w: ', w)
+	print('w.T', w.T)
+	w2 = numpy.matrix(w.T)
+	print('w2.T', w2)
+	return2 = (w.T * avg_ret)[0]
+	risk2 = numpy.asscalar(numpy.sqrt(w.T * P * w))
+	print('return2: ', return2)
+	print('risk2: ', risk2)
+
+	returns.append(return2)
+	risks.append(risk2)
+
+	w2 = numpy.insert(w2, w2.size, [risk2, return2])
+	print('w2:', w2)
+	df = df.append(pd.DataFrame(w2, columns=[columns]), ignore_index=True)
+
+print('df_portfolios: \n', df)
+# print('df_portfolios: \n', df.head())
+# print('df_portfolios: \n', df.tail())
+
+df.to_csv(xDir + 'xOptimalPortfolio_Equity_Bond_term.txt')
+
+fig4, ax4 = plt4.subplots()
+ax4.plot(risks, returns, color='red', label='Equity/Bond')
+fig4.suptitle('Efficient Frontiers for ' + xSubText, fontsize=16,y=0.95)
+ax4.set_xlabel('Annual Risk', fontsize=10)
+ax4.set_ylabel('Annual Return', fontsize=10)
+
+# plt.ylabel('mean')
+# plt.xlabel('std')
+# plt.title('Efficient Frontier xx with underlying index ' + xUnderlier)
+# #plt.plot(risks, returns, 'y-o')
+# plt.plot(risks, returns, color='red',label='Equity/Bond')
+# plt.legend(loc='lower right')
+# import matplotlib.ticker as mtick
+# plt.axis()
+
+xStock_scater = plt4.scatter(std_vec[0], avg_ret[0], marker='x', color='red',label='Stock')	#stock
+xBond_scatter = plt4.scatter(std_vec[1], avg_ret[1], marker='*', color='green',label='Bond')	#bond
+if xSI_indicator:
+	if xCash:
+		xSI_scatter = plt4.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+		xCash_scatter = plt4.scatter(std_vec[3], avg_ret[3], marker='+', color='blue',label='Cash')  # cash
+	else:
+		xSI_scatter = plt4.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+else:
+	if xCash:
+		xCash_scatter = plt4.scatter(std_vec[2], avg_ret[2], marker='+', color='blue',label='Cash')  # cash
+	else:
+		print ('nothing here')
+#plt.show()
+#plt.show(block=False)
+#plt.interactive(False)
+#plt.show(block=True)
+#plt.interactive(False)
+############################
+
+##plt.xlim(xmin=0)
+##plt.ylim(ymin=0.02)
+
+##plt.show()
+############# CASE 2 ###########################
+############################ EQUITY, BOND ONLY AND SI #################
+xSI_indicator = True
+if (xSI_indicator):
+	xRtns = xSPXT[['SPXT_rtn_1_year', 'BondTR_rtn_1_year', 'SI_rtn_1_year']].copy()
+else:
+	xRtns = xSPXT[['SPXT_rtn_1_year', 'BondTR_rtn_1_year']].copy()
+
+xCash = False
+if xCash:
+	xRtns['cash_rtn'] = 0.025 / 252
+
+#WKPRICE['rtn_w'] = WKPRICE.groupby('CUSIP')['PRICE'].pct_change()
+#WKPRICE['std_w'] = WKPRICE.groupby('CUSIP')['rtn_w'].apply(pd.rolling_std,window=52*2,min_periods=26)
+#WKPRICE.rename(columns={'DATE':'TueDATE'},inplace=True)
+
+print(xSPXT.head())
+print(xRtns.head())
+print(xRtns.tail())
+
+std_vec = cvxopt.matrix(xRtns.std(axis=0)) ################ * numpy.sqrt(252)
+################
+##std_vec[2] = 0.06
+#############
+print('daily obs:\n', xRtns.count(axis=0))
+print('daily mean:\n', xRtns.mean(axis=0))
+print('daily Std:\n', xRtns.std(axis=0))
+print('correlation:\n', xRtns.corr())
+print('covariance:\n', xRtns.cov())
+print(xRtns.describe())
+
+#A = xRtns.values
+print('xRtns: ', xRtns.head())
+##print('A: ', A)
+covs = xRtns.cov() ############### * (252 ^ 2)
+print('covs: ', covs)
+########## debug testing #########
+#covs['SI_rtn_term'][0] = covs['SI_rtn_term'][0]*(-1)
+#covs['SPXT_rtn_term'][2] = covs['SPXT_rtn_term'][2]*(-1)
+##########################
+covs = covs.values
+print('covs: ', covs)
+
+corr = xRtns.corr()
+corr = corr.values
+
+################ alternative way to calculate covs ########
+xL = [std_vec[0],std_vec[1],std_vec[2]]
+xDiag_std = np.diag(xL)
+#covs = std_vec * corr * std_vec.T
+covs_2 = cvxopt.matrix(xDiag_std) * cvxopt.matrix(corr) * cvxopt.matrix(xDiag_std)
+### note:  this calculation is slightly different from the
+###########################################################
+
+avg_ret = cvxopt.matrix(xRtns.mean(axis=0))    #.T
+avg_ret = avg_ret ################# * 252	#annualized
+print('avg_ret: ', avg_ret)
+######### testing debug #########
+####avg_ret[2] = avg_ret[2] * 1.2
+##########################
+
+n = len(avg_ret)
+print('n = ', n)
+r_min2 = min(avg_ret)
+print('r_min2 = ', r_min2)
+
+r_max2 = max(avg_ret)
+print('r_max2 = ', r_max2)
+
+# from numpy.linalg import eig
+# values, vectors = eig(covs)
+# print('values: ', values)
+# print('eigen vector: ', vectors)
+
+###################################################################
+# solves the QP, where x is the allocation of the portfolio:
+# minimize   x'Px + q'x
+# subject to Gx <= h
+#            Ax == b
+#
+# Input:  n       - # of assets
+#         avg_ret - nx1 matrix of average returns
+#         covs    - nxn matrix of return covariance
+#         r_min   - the minimum expected return that you'd
+#                   like to achieve
+# Output: sol - cvxopt solution object
+##########<=mmodified = R ################
+def optimize_portfolio_modified(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	#G = cvxopt.matrix(numpy.concatenate((
+	# 	-numpy.transpose(numpy.array(avg_ret)),
+	# 	-numpy.identity(n)), 0))
+	#G = cvxopt.matrix(numpy.concatenate((
+	#	-numpy.identity(n)), 0))
+	G = cvxopt.matrix(-np.diag(np.ones(n),0))
+	# h = cvxopt.matrix(numpy.concatenate((
+	# 	-numpy.ones((1, 1))*r_min,
+	# 	numpy.zeros((n, 1))), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	#-numpy.transpose(numpy.array(avg_ret)),
+	#A = cvxopt.matrix(1.0, (1, n))
+	A = cvxopt.matrix(numpy.concatenate((
+		numpy.transpose(numpy.array(avg_ret)),
+		cvxopt.matrix(1.0, (1, n)))))
+	#b = cvxopt.matrix(1.0)
+	b = cvxopt.matrix(numpy.concatenate((
+		numpy.ones((1, 1)) * r_min,
+		cvxopt.matrix(1.0))))
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+
+############## original version ##################
+def optimize_portfolio(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	G = cvxopt.matrix(numpy.concatenate((
+		-numpy.transpose(numpy.array(avg_ret)),
+		-numpy.identity(n)), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		-numpy.ones((1, 1))*r_min,
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	A = cvxopt.matrix(1.0, (1, n))
+	b = cvxopt.matrix(1.0)
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+###############################################
+# ### setup the parameters
+# symbols = ['GOOG', 'AIMC', 'CE', 'BH', 'AHGP', 'AB', 'HLS', 'BKH', 'LUV']
+# # pull data from this date range
+# start   = '1/1/2010'
+# end     = '1/1/2014'
+# n       = len(symbols)
+# # average yearly return for each stock
+# avg_ret = matrix(map(lambda s: stocks.avg_return(s, start, end, 'y'), symbols))
+# # covariance of asset returns
+# covs    = matrix(numpy.array(stocks.cov_matrix(symbols, start, end, 'y')))
+# # minimum expected return threshold
+
+### solve
+
+P = cvxopt.matrix(covs)
+returns = []
+risks = []
+portfolios = []
+df = pd.DataFrame()
+columns = ['w_{}'.format(x) for x in range(1, n + 1)] + ['risk', 'return']
+
+xStep = (r_max2 - r_min2) / 100 ############0.001   #0.001
+for delta_r in numpy.arange(r_min2, r_max2, xStep):
+	print('delta_r: ', delta_r)
+	w = optimize_portfolio(n, avg_ret, covs, delta_r)['x']
+	print('w: ', w)
+	print('w.T', w.T)
+	w2 = numpy.matrix(w.T)
+	print('w2.T', w2)
+	return2 = (w.T * avg_ret)[0]
+	risk2 = numpy.asscalar(numpy.sqrt(w.T * P * w))
+	print('return2: ', return2)
+	print('risk2: ', risk2)
+
+	returns.append(return2)
+	risks.append(risk2)
+
+	w2 = numpy.insert(w2, w2.size, [risk2, return2])
+	print('w2:', w2)
+	df = df.append(pd.DataFrame(w2, columns=[columns]), ignore_index=True)
+
+print('df_portfolios: \n', df)
+# print('df_portfolios: \n', df.head())
+# print('df_portfolios: \n', df.tail())
+
+df.to_csv(xDir + 'xOptimalPortfolio_equity_bond_SI_1_year.txt')
+
+ax4.plot(risks, returns,color='blue',label='Equity/Bond/SI')
+import matplotlib.ticker as mtick
+#plt.axis()
+
+#xStock_scater = plt.scatter(std_vec[0], avg_ret[0], marker='x', color='red',label='Stock')	#stock
+#xBond_scatter = plt.scatter(std_vec[1], avg_ret[1], marker='*', color='green')	#bond
+if xSI_indicator:
+	if xCash:
+		xSI_scatter = plt4.scatter(std_vec[2], avg_ret[2], marker='X', color='black',lable='SI')  # SI
+		xCash_scatter = plt4.scatter(std_vec[3], avg_ret[3], marker='+', color='blue',label='Cash')  # cash
+	else:
+		xSI_scatter = plt4.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+else:
+	if xCash:
+		xCash_scatter = plt4.scatter(std_vec[2], avg_ret[2], marker='+', color='blue',label='Cash')  # cash
+	else:
+		print('nothing here')
+#plt3.show()
+#plt.show(block=False)
+#plt.interactive(False)
+#plt.show(block=True)
+#plt.interactive(False)
+import matplotlib.ticker as mtick4
+
+#fig = plt.figure(1)
+#fig.add_subplot(111)
+#ax = fig.add_subplot(111)
+
+#ax.plot(perc, data)
+
+fmt = '%.0f%%' # Format you want the ticks, e.g. '40%'
+##xticks = mtick.FormatStrFormatter(fmt)
+xticks = mtick4.FuncFormatter("{:.0%}".format)
+ax4.xaxis.set_major_formatter(xticks)
+ax4.yaxis.set_major_formatter(xticks)
+
+############# CASE 3a : THIS HAS 25% cap on SI WEIGHT!!! ###########################
+#############1 year returns from daily prices for EQUITY, BOND; AND SI uses 1 year return 2/4/6 year returns ###########
+xSI_indicator = True
+if (xSI_indicator):
+	xRtns = xSPXT[['SPXT_rtn_1_year', 'BondTR_rtn_1_year', 'SI_rtn_1_year']]
+else:
+	xRtns = xSPXT[['SPXT_rtn_1_year', 'BondTR_rtn_1_year']]
+
+xCash = False
+if xCash:
+	xRtns['cash_rtn'] = 0.025 / 252
+
+#WKPRICE['rtn_w'] = WKPRICE.groupby('CUSIP')['PRICE'].pct_change()
+#WKPRICE['std_w'] = WKPRICE.groupby('CUSIP')['rtn_w'].apply(pd.rolling_std,window=52*2,min_periods=26)
+#WKPRICE.rename(columns={'DATE':'TueDATE'},inplace=True)
+
+print(xSPXT.head())
+print(xRtns.head())
+print(xRtns.tail())
+
+std_vec = cvxopt.matrix(xRtns.std(axis=0)) * numpy.sqrt(252)
+################
+##std_vec[2] = 0.06
+#############
+print('daily obs:\n', xRtns.count(axis=0))
+print('daily mean:\n', xRtns.mean(axis=0))
+print('daily Std:\n', xRtns.std(axis=0))
+print('correlation:\n', xRtns.corr())
+print('covariance:\n', xRtns.cov())
+print(xRtns.describe())
+
+#A = xRtns.values
+print('xRtns: ', xRtns.head())
+##print('A: ', A)
+covs = xRtns.cov() ############ * (252 ^ 2)
+print('covs: ', covs)
+
+covs = covs.values
+print('covs: ', covs)
+
+corr = xRtns.corr()
+corr = corr.values
+
+################ alternative way to calculate covs ########
+xL = [std_vec[0],std_vec[1],std_vec[2]]
+xDiag_std = np.diag(xL)
+#covs = std_vec * corr * std_vec.T
+covs_2 = cvxopt.matrix(xDiag_std) * cvxopt.matrix(corr) * cvxopt.matrix(xDiag_std)
+### note:  this calculation is slightly different from the above #########
+##################
+
+avg_ret = cvxopt.matrix(xRtns.mean(axis=0))    #.T
+avg_ret = avg_ret ####### no more * 252	#annualized
+print('avg_ret: ', avg_ret)
+######### testing #########
+###avg_ret[2] = avg_ret[2] / 3
+##########################
+
+n = len(avg_ret)
+print('n = ', n)
+r_min2 = min(avg_ret)
+print('r_min2 = ', r_min2)
+
+r_max2 = max(avg_ret)
+print('r_max2 = ', r_max2)
+
+
+# from numpy.linalg import eig
+# values, vectors = eig(covs)
+# print('values: ', values)
+# print('eigen vector: ', vectors)
+
+###################################################################
+# solves the QP, where x is the allocation of the portfolio:
+# minimize   x'Px + q'x
+# subject to Gx <= h
+#            Ax == b
+#
+# Input:  n       - # of assets
+#         avg_ret - nx1 matrix of average returns
+#         covs    - nxn matrix of return covariance
+#         r_min   - the minimum expected return that you'd
+#                   like to achieve
+# Output: sol - cvxopt solution object
+##########<=mmodified = R ################
+def optimize_portfolio_modified(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	#G = cvxopt.matrix(numpy.concatenate((
+	# 	-numpy.transpose(numpy.array(avg_ret)),
+	# 	-numpy.identity(n)), 0))
+	#G = cvxopt.matrix(numpy.concatenate((
+	#	-numpy.identity(n)), 0))
+	G = cvxopt.matrix(-np.diag(np.ones(n),0))
+	# h = cvxopt.matrix(numpy.concatenate((
+	# 	-numpy.ones((1, 1))*r_min,
+	# 	numpy.zeros((n, 1))), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	#-numpy.transpose(numpy.array(avg_ret)),
+	#A = cvxopt.matrix(1.0, (1, n))
+	A = cvxopt.matrix(numpy.concatenate((
+		numpy.transpose(numpy.array(avg_ret)),
+		cvxopt.matrix(1.0, (1, n)))))
+	#b = cvxopt.matrix(1.0)
+	b = cvxopt.matrix(numpy.concatenate((
+		numpy.ones((1, 1)) * r_min,
+		cvxopt.matrix(1.0))))
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+
+############## original version ##################
+def optimize_portfolio(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	G = cvxopt.matrix(numpy.concatenate((
+		-numpy.transpose(numpy.array(avg_ret)),
+		-numpy.identity(n)), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		-numpy.ones((1, 1))*r_min,
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	A = cvxopt.matrix(1.0, (1, n))
+	b = cvxopt.matrix(1.0)
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+###############################################
+# ### setup the parameters
+# symbols = ['GOOG', 'AIMC', 'CE', 'BH', 'AHGP', 'AB', 'HLS', 'BKH', 'LUV']
+# # pull data from this date range
+# start   = '1/1/2010'
+# end     = '1/1/2014'
+# n       = len(symbols)
+# # average yearly return for each stock
+# avg_ret = matrix(map(lambda s: stocks.avg_return(s, start, end, 'y'), symbols))
+# # covariance of asset returns
+# covs    = matrix(numpy.array(stocks.cov_matrix(symbols, start, end, 'y')))
+# # minimum expected return threshold
+
+### solve
+
+P = cvxopt.matrix(covs)
+returns = []
+risks = []
+portfolios = []
+df = pd.DataFrame()
+columns = ['w_{}'.format(x) for x in range(1, n + 1)] + ['risk', 'return']
+
+xStep = 0.001   #0.001
+for delta_r in numpy.arange(r_min2, r_max2, xStep):
+	print('delta_r: ', delta_r)
+	w = optimize_portfolio(n, avg_ret, covs, delta_r)['x']
+	print('w: ', w)
+	print('w.T', w.T)
+	w2 = numpy.matrix(w.T)
+	print('w2.T', w2)
+	return2 = (w.T * avg_ret)[0]
+	risk2 = numpy.asscalar(numpy.sqrt(w.T * P * w))
+	print('return2: ', return2)
+	print('risk2: ', risk2)
+
+	returns.append(return2)
+	risks.append(risk2)
+
+	w2 = numpy.insert(w2, w2.size, [risk2, return2])
+	print('w2:', w2)
+	df = df.append(pd.DataFrame(w2, columns=[columns]), ignore_index=True)
+
+print('df_portfolios: \n', df)
+# print('df_portfolios: \n', df.head())
+# print('df_portfolios: \n', df.tail())
+
+df.to_csv(xDir + 'xOptimalPortfolio_equity_bond_SI_1_year_25pct.txt')
+
+#import matplotlib.ticker as mtick
+
+#fig = plt.figure(1)
+#fig.add_subplot(111)
+#ax = fig.add_subplot(111)
+
+#ax.plot(perc, data)
+
+# fmt = '%.0f%%' # Format you want the ticks, e.g. '40%'
+# ##xticks = mtick.FormatStrFormatter(fmt)
+# xticks = mtick.FuncFormatter("{:.0%}".format)
+# ax4.xaxis.set_major_formatter(xticks)
+# ax4.yaxis.set_major_formatter(xticks)
+
+#plt.ylabel('mean')
+#plt.xlabel('std')
+#plt.title('Efficient Frontier xxxx with underlying index ' + xUnderlier)
+#plt.plot(risks, returns, 'y-o')
+ax4.plot(risks, returns,color='black',label='Equity/Bond/SI with max 25% on SI')
+import matplotlib.ticker as mtick
+#plt.axis()
+
+#xStock_scater = plt.scatter(std_vec[0], avg_ret[0], marker='x', color='red')	#stock
+#xBond_scatter = plt.scatter(std_vec[1], avg_ret[1], marker='*', color='green')	#bond
+# if xSI_indicator:
+# 	if xCash:
+# 		xSI_scatter = plt.scatter(std_vec[2], avg_ret[2], marker='X', color='black', label='SI')  # SI
+# 		xCash_scatter = plt.scatter(std_vec[3], avg_ret[3], marker='+', color='blue',label='Cash')  # cash
+# 	else:
+# 		#print('hererrrrrrrrr')
+# 		xSI_scatter = plt.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+# else:
+# 	if xCash:
+# 		xCash_scatter = plt.scatter(std_vec[2], avg_ret[2], marker='+', color='blue',label='Cash')  # cash
+# 	else:
+# 		print('nothing here')
+#plt.show()
+#plt.show(block=False)
+#plt.interactive(False)
+#plt.show(block=True)
+#plt.interactive(False)
+############################
+################################
+plt4.grid(which='both')
+plt4.legend(loc='best', ncol=2,facecolor='white')
+plt4.xlim(xmin=0)
+plt4.ylim(ymin=0.02)
+
+plt4.savefig(xDir + 'EfficientFrontier_'+xSubText+'_1_year.png')
+plt4.show()
+############################
+##################### the following are efficient frontiers based on 1-YEAR returns for SPXT, BondTR and SI #######
+############### ALL 1-year returns are derived from 2/4/6 years ROLLING ####################
+############################ EQUITY AND BOND ONLY #################
+import matplotlib.pyplot as plt5
+xSI_indicator = False
+if (xSI_indicator):
+	xRtns = xSPXT[['SPXT_rtn_1_year_roll', 'BondTR_rtn_1_year_roll', 'SI_rtn_1_year']]
+else:
+	xRtns = xSPXT[['SPXT_rtn_1_year_roll', 'BondTR_rtn_1_year_roll']]
+
+xCash = False
+if xCash:
+	xRtns['cash_rtn'] = 0.025 / 252
+
+#WKPRICE['rtn_w'] = WKPRICE.groupby('CUSIP')['PRICE'].pct_change()
+#WKPRICE['std_w'] = WKPRICE.groupby('CUSIP')['rtn_w'].apply(pd.rolling_std,window=52*2,min_periods=26)
+#WKPRICE.rename(columns={'DATE':'TueDATE'},inplace=True)
+
+print(xSPXT.head())
+print(xRtns.head())
+print(xRtns.tail())
+
+std_vec = xRtns.std(axis=0)  ############# * numpy.sqrt(252)
+
+print('daily obs:\n', xRtns.count(axis=0))
+print('daily mean:\n', xRtns.mean(axis=0))
+print('daily Std:\n', xRtns.std(axis=0))
+print('correlation:\n', xRtns.corr())
+print('covariance:\n', xRtns.cov())
+print(xRtns.describe())
+
+#A = xRtns.values
+print('xRtns: ', xRtns.head())
+##print('A: ', A)
+covs = xRtns.cov()  ########## * (252 ^ 2)
+print('covs: ', covs)
+
+covs = covs.values
+
+print('covs: ', covs)
+avg_ret = cvxopt.matrix(xRtns.mean(axis=0))    #.T
+avg_ret = avg_ret ################ * 252	#annualized
+print('avg_ret: ', avg_ret)
+#########
+############
+
+n = len(avg_ret)
+print('n = ', n)
+r_min2 = min(avg_ret)
+print('r_min2 = ', r_min2)
+
+r_max2 = max(avg_ret)
+print('r_max2 = ', r_max2)
+
+# from numpy.linalg import eig
+# values, vectors = eig(covs)
+# print('values: ', values)
+# print('eigen vector: ', vectors)
+
+###################################################################
+# solves the QP, where x is the allocation of the portfolio:
+# minimize   x'Px + q'x
+# subject to Gx <= h
+#            Ax == b
+#
+# Input:  n       - # of assets
+#         avg_ret - nx1 matrix of average returns
+#         covs    - nxn matrix of return covariance
+#         r_min   - the minimum expected return that you'd
+#                   like to achieve
+# Output: sol - cvxopt solution object
+def optimize_portfolio(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	G = cvxopt.matrix(numpy.concatenate((
+		-numpy.transpose(numpy.array(avg_ret)),
+		-numpy.identity(n)), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		-numpy.ones((1, 1))*r_min,
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	A = cvxopt.matrix(1.0, (1, n))
+	b = cvxopt.matrix(1.0)
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+
+# ### setup the parameters
+# symbols = ['GOOG', 'AIMC', 'CE', 'BH', 'AHGP', 'AB', 'HLS', 'BKH', 'LUV']
+# # pull data from this date range
+# start   = '1/1/2010'
+# end     = '1/1/2014'
+# n       = len(symbols)
+# # average yearly return for each stock
+# avg_ret = matrix(map(lambda s: stocks.avg_return(s, start, end, 'y'), symbols))
+# # covariance of asset returns
+# covs    = matrix(numpy.array(stocks.cov_matrix(symbols, start, end, 'y')))
+# # minimum expected return threshold
+
+### solve
+
+P = cvxopt.matrix(covs)
+returns = []
+risks = []
+portfolios = []
+df = pd.DataFrame()
+columns = ['w_{}'.format(x) for x in range(1, n + 1)] + ['risk', 'return']
+
+xStep = (r_max2 - r_min2) / 100  ###############0.001   #0.001
+for delta_r in numpy.arange(r_min2, r_max2, xStep):
+	print('delta_r: ', delta_r)
+	w = optimize_portfolio(n, avg_ret, covs, delta_r)['x']
+	print('w: ', w)
+	print('w.T', w.T)
+	w2 = numpy.matrix(w.T)
+	print('w2.T', w2)
+	return2 = (w.T * avg_ret)[0]
+	risk2 = numpy.asscalar(numpy.sqrt(w.T * P * w))
+	print('return2: ', return2)
+	print('risk2: ', risk2)
+
+	returns.append(return2)
+	risks.append(risk2)
+
+	w2 = numpy.insert(w2, w2.size, [risk2, return2])
+	print('w2:', w2)
+	df = df.append(pd.DataFrame(w2, columns=[columns]), ignore_index=True)
+
+print('df_portfolios: \n', df)
+# print('df_portfolios: \n', df.head())
+# print('df_portfolios: \n', df.tail())
+
+df.to_csv(xDir + 'xOptimalPortfolio_Equity_Bond_1_year_roll.txt')
+
+fig5, ax5 = plt5.subplots()
+ax5.plot(risks, returns, color='red', label='Equity/Bond')
+fig5.suptitle('Efficient Frontiers (ALL ROLLING) for ' + xSubText, fontsize=14,y=0.95)
+ax5.set_xlabel('Annual Risk', fontsize=10)
+ax5.set_ylabel('Annual Return', fontsize=10)
+
+# plt.ylabel('mean')
+# plt.xlabel('std')
+# plt.title('Efficient Frontier xx with underlying index ' + xUnderlier)
+# #plt.plot(risks, returns, 'y-o')
+# plt.plot(risks, returns, color='red',label='Equity/Bond')
+# plt.legend(loc='lower right')
+# import matplotlib.ticker as mtick
+# plt.axis()
+
+xStock_scater = plt4.scatter(std_vec[0], avg_ret[0], marker='x', color='red',label='Stock')	#stock
+xBond_scatter = plt4.scatter(std_vec[1], avg_ret[1], marker='*', color='green',label='Bond')	#bond
+if xSI_indicator:
+	if xCash:
+		xSI_scatter = plt4.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+		xCash_scatter = plt4.scatter(std_vec[3], avg_ret[3], marker='+', color='blue',label='Cash')  # cash
+	else:
+		xSI_scatter = plt4.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+else:
+	if xCash:
+		xCash_scatter = plt4.scatter(std_vec[2], avg_ret[2], marker='+', color='blue',label='Cash')  # cash
+	else:
+		print ('nothing here')
+#plt.show()
+#plt.show(block=False)
+#plt.interactive(False)
+#plt.show(block=True)
+#plt.interactive(False)
+############################
+
+##plt.xlim(xmin=0)
+##plt.ylim(ymin=0.02)
+
+##plt.show()
+############# CASE 2 ###########################
+############################ EQUITY, BOND ONLY AND SI #################
+xSI_indicator = True
+if (xSI_indicator):
+	xRtns = xSPXT[['SPXT_rtn_1_year_roll', 'BondTR_rtn_1_year_roll', 'SI_rtn_1_year']]
+else:
+	xRtns = xSPXT[['SPXT_rtn_1_year_roll', 'BondTR_rtn_1_year_roll']]
+
+xCash = False
+if xCash:
+	xRtns['cash_rtn'] = 0.025 / 252
+
+#WKPRICE['rtn_w'] = WKPRICE.groupby('CUSIP')['PRICE'].pct_change()
+#WKPRICE['std_w'] = WKPRICE.groupby('CUSIP')['rtn_w'].apply(pd.rolling_std,window=52*2,min_periods=26)
+#WKPRICE.rename(columns={'DATE':'TueDATE'},inplace=True)
+
+print(xSPXT.head())
+print(xRtns.head())
+print(xRtns.tail())
+
+std_vec = cvxopt.matrix(xRtns.std(axis=0)) ################ * numpy.sqrt(252)
+################
+##std_vec[2] = 0.06
+#############
+print('daily obs:\n', xRtns.count(axis=0))
+print('daily mean:\n', xRtns.mean(axis=0))
+print('daily Std:\n', xRtns.std(axis=0))
+print('correlation:\n', xRtns.corr())
+print('covariance:\n', xRtns.cov())
+print(xRtns.describe())
+
+#A = xRtns.values
+print('xRtns: ', xRtns.head())
+##print('A: ', A)
+covs = xRtns.cov() ############### * (252 ^ 2)
+print('covs: ', covs)
+########## debug testing #########
+#covs['SI_rtn_term'][0] = covs['SI_rtn_term'][0]*(-1)
+#covs['SPXT_rtn_term'][2] = covs['SPXT_rtn_term'][2]*(-1)
+##########################
+covs = covs.values
+print('covs: ', covs)
+
+corr = xRtns.corr()
+corr = corr.values
+
+################ alternative way to calculate covs ########
+xL = [std_vec[0],std_vec[1],std_vec[2]]
+xDiag_std = np.diag(xL)
+#covs = std_vec * corr * std_vec.T
+covs_2 = cvxopt.matrix(xDiag_std) * cvxopt.matrix(corr) * cvxopt.matrix(xDiag_std)
+### note:  this calculation is slightly different from the
+###########################################################
+
+avg_ret = cvxopt.matrix(xRtns.mean(axis=0))    #.T
+avg_ret = avg_ret ################# * 252	#annualized
+print('avg_ret: ', avg_ret)
+######### testing debug #########
+####avg_ret[2] = avg_ret[2] * 1.2
+##########################
+
+n = len(avg_ret)
+print('n = ', n)
+r_min2 = min(avg_ret)
+print('r_min2 = ', r_min2)
+
+r_max2 = max(avg_ret)
+print('r_max2 = ', r_max2)
+
+# from numpy.linalg import eig
+# values, vectors = eig(covs)
+# print('values: ', values)
+# print('eigen vector: ', vectors)
+
+###################################################################
+# solves the QP, where x is the allocation of the portfolio:
+# minimize   x'Px + q'x
+# subject to Gx <= h
+#            Ax == b
+#
+# Input:  n       - # of assets
+#         avg_ret - nx1 matrix of average returns
+#         covs    - nxn matrix of return covariance
+#         r_min   - the minimum expected return that you'd
+#                   like to achieve
+# Output: sol - cvxopt solution object
+def optimize_portfolio(n, avg_ret, covs, r_min):
+	P = cvxopt.matrix(covs)
+	# x = variable(n)
+	q = cvxopt.matrix(numpy.zeros((n, 1)), tc='d')
+	# inequality constraints Gx <= h
+	# captures the constraints (avg_ret'x >= r_min) and (x >= 0)
+	# note: the loop starts from the lowest return to the highest return
+	# if the lowest return has a higher risk, this constraint will find a
+	# higher return corresponding to the lowest risk!!!  that is why there
+	# is no line (or no curve) on the efficient frontier from the return
+	# corresponding to the minimal risk to the lowest return.
+	G = cvxopt.matrix(numpy.concatenate((
+		-numpy.transpose(numpy.array(avg_ret)),
+		-numpy.identity(n)), 0))
+	h = cvxopt.matrix(numpy.concatenate((
+		-numpy.ones((1, 1))*r_min,
+		numpy.zeros((n, 1))), 0))
+	# equality constraint Ax = b; captures the constraint sum(x) == 1
+	A = cvxopt.matrix(1.0, (1, n))
+	b = cvxopt.matrix(1.0)
+	print('P = ', P)
+	print('q = ', q)
+	print('G = ', G)
+	print('h = ', h)
+	print('A = ', A)
+	print('b = ', b)
+	# A = numpy.matrix(1.0, (1, n))
+	# print('A = ', A)
+	sol = solvers.qp(P, q, G, h, A, b)
+	return sol
+
+# ### setup the parameters
+# symbols = ['GOOG', 'AIMC', 'CE', 'BH', 'AHGP', 'AB', 'HLS', 'BKH', 'LUV']
+# # pull data from this date range
+# start   = '1/1/2010'
+# end     = '1/1/2014'
+# n       = len(symbols)
+# # average yearly return for each stock
+# avg_ret = matrix(map(lambda s: stocks.avg_return(s, start, end, 'y'), symbols))
+# # covariance of asset returns
+# covs    = matrix(numpy.array(stocks.cov_matrix(symbols, start, end, 'y')))
+# # minimum expected return threshold
+
+### solve
+
+P = cvxopt.matrix(covs)
+returns = []
+risks = []
+portfolios = []
+df = pd.DataFrame()
+columns = ['w_{}'.format(x) for x in range(1, n + 1)] + ['risk', 'return']
+
+xStep = (r_max2 - r_min2) / 100 ############0.001   #0.001
+for delta_r in numpy.arange(r_min2, r_max2, xStep):
+	print('delta_r: ', delta_r)
+	w = optimize_portfolio(n, avg_ret, covs, delta_r)['x']
+	print('w: ', w)
+	print('w.T', w.T)
+	w2 = numpy.matrix(w.T)
+	print('w2.T', w2)
+	return2 = (w.T * avg_ret)[0]
+	risk2 = numpy.asscalar(numpy.sqrt(w.T * P * w))
+	print('return2: ', return2)
+	print('risk2: ', risk2)
+
+	returns.append(return2)
+	risks.append(risk2)
+
+	w2 = numpy.insert(w2, w2.size, [risk2, return2])
+	print('w2:', w2)
+	df = df.append(pd.DataFrame(w2, columns=[columns]), ignore_index=True)
+
+print('df_portfolios: \n', df)
+# print('df_portfolios: \n', df.head())
+# print('df_portfolios: \n', df.tail())
+
+df.to_csv(xDir + 'xOptimalPortfolio_equity_bond_SI_1_year_roll.txt')
+
+ax5.plot(risks, returns,color='blue',label='Equity/Bond/SI')
+import matplotlib.ticker as mtick
+#plt.axis()
+
+#xStock_scater = plt.scatter(std_vec[0], avg_ret[0], marker='x', color='red',label='Stock')	#stock
+#xBond_scatter = plt.scatter(std_vec[1], avg_ret[1], marker='*', color='green')	#bond
+if xSI_indicator:
+	if xCash:
+		xSI_scatter = plt4.scatter(std_vec[2], avg_ret[2], marker='X', color='black',lable='SI')  # SI
+		xCash_scatter = plt4.scatter(std_vec[3], avg_ret[3], marker='+', color='blue',label='Cash')  # cash
+	else:
+		xSI_scatter = plt4.scatter(std_vec[2], avg_ret[2], marker='X', color='black',label='SI')  # SI
+else:
+	if xCash:
+		xCash_scatter = plt4.scatter(std_vec[2], avg_ret[2], marker='+', color='blue',label='Cash')  # cash
+	else:
+		print('nothing here')
+#plt3.show()
+#plt.show(block=False)
+#plt.interactive(False)
+#plt.show(block=True)
+#plt.interactive(False)
+import matplotlib.ticker as mtick5
+
+#fig = plt.figure(1)
+#fig.add_subplot(111)
+#ax = fig.add_subplot(111)
+
+#ax.plot(perc, data)
+
+fmt = '%.0f%%' # Format you want the ticks, e.g. '40%'
+##xticks = mtick.FormatStrFormatter(fmt)
+xticks = mtick5.FuncFormatter("{:.0%}".format)
+ax5.xaxis.set_major_formatter(xticks)
+ax5.yaxis.set_major_formatter(xticks)
+
+plt5.grid(which='both')
+plt5.legend(loc='best', ncol=3,facecolor='white')
+plt5.xlim(xmin=0)
+plt5.ylim(ymin=0.02)
+
+plt5.savefig(xDir + 'EfficientFrontier_'+xSubText+'_1_year_roll.png')
+plt5.show()
+############################

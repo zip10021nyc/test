@@ -1,0 +1,466 @@
+### Portfolio Optiimization
+### Sean Welleck | 2014
+#
+# Finds an optimal allocation of stocks in a portfolio,
+# satisfying a minimum expected return.
+# The problem is posed as a Quadratic Program, and solved
+# using the cvxopt library.
+# Uses actual past stock data, obtained using the stocks module.
+import math
+import numpy as np
+import pandas as pd
+import datetime
+import cvxopt
+from cvxopt import matrix, solvers
+import matplotlib.pyplot as plt
+##########################
+import warnings
+warnings.filterwarnings('ignore')
+warnings.warn('DelftStack')
+warnings.warn('Do not show this message')
+#####################
+solvers.options['show_progress'] = False        # !!!
+
+pd.set_option('display.max_rows', 500)
+pd.set_option('display.max_columns', 500)
+pd.set_option('display.width', 1000)
+
+#from cvxopt import solvers
+#import stocks
+import numpy
+import pandas as pd
+import datetime
+
+# c = cvxopt.matrix([0, -1], tc='d')
+# print('c: ', c)
+# c = numpy.matrix(c)
+# print('c: ', c)
+#
+# c = cvxopt.matrix([0, -1])
+# print('c: ', c)
+# G = cvxopt.matrix([[-1, 1], [3, 2], [2, 3], [-1, 0], [0, -1]], tc='d')
+# print('G: ', G)
+##################
+xDir = r'D:\\Users\\ggu\\Documents\\GU\\MeanVarianceOptimization\\'
+xSPXT = pd.read_csv(xDir + 'SPXT.txt')
+xSPXT['DATE'] = pd.to_datetime(xSPXT['DATE'], format='%m/%d/%Y')
+xAggregateBondTR = pd.read_csv(xDir + 'AggregateBondTR.txt')
+xAggregateBondTR['DATE'] = pd.to_datetime(xAggregateBondTR['DATE'], format='%m/%d/%Y')
+
+# xSI = pd.read_csv(xDir + 'SI.txt')
+# xSI['DATE'] = pd.to_datetime(xSI['DATE'], format='%m/%d/%Y')
+
+xSPX = pd.read_csv(xDir + 'SPX.txt')
+xSPX['DATE'] = pd.to_datetime(xSPX['DATE'], format='%m/%d/%Y')
+
+##xAggregateBondTR = pd.read_csv(xDir + 'AggregateBondTR.txt')
+
+print(xSPXT.head())
+print(xAggregateBondTR.head())
+#print(xSI.head())
+print(xSPX.head())
+
+# xSPXT = pd.merge(xSPXT, xSI, on=['DATE'], how='left')
+xSPXT = pd.merge(xSPXT, xAggregateBondTR, on=['DATE'], how='left')
+xSPXT = pd.merge(xSPXT, xSPX, on=['DATE'], how='left')
+
+# xMinDateSI = xSI['DATE'].min()
+# xMaxDateSI = xSI['DATE'].max()
+
+###xSPXT = xSPXT.loc[(xSPXT['DATE'] >= xMinDateSI) & (xSPXT['DATE'] <= xMaxDateSI)]
+
+#xSPXT['intrinsic_value'].fillna(method='ffill', inplace=True) #fill N/As with previous prices!!!!
+xSPXT['LBUSTRUU'].fillna(method='ffill', inplace=True) #fill N/As with previous prices!!!!
+xSPXT['SPX'].fillna(method='ffill', inplace=True)
+
+xSPXT.rename(columns={'LBUSTRUU': 'BondTR'},inplace=True)
+
+xSPXT['SPXT_rtn'] = xSPXT['SPXT'].pct_change()
+#xSPXT['SI_rtn'] = xSPXT['intrinsic_value'].pct_change()
+xSPXT['BondTR_rtn'] = xSPXT['BondTR'].pct_change()
+xSPXT['SPX_rtn'] = xSPXT['SPX'].pct_change()
+
+xSPXT.to_csv(xDir + 'xSPXT.txt')
+
+xSPXT = xSPXT.dropna()
+########################
+xUnderlier = 'SPX'
+
+#xDF0 = xSPXT[['DATE', xUnderlier,'SPXT','SPXT_rtn','BondTR','BondTR_rtn']]
+xDF0 = xSPXT[['DATE', xUnderlier,'SPXT','BondTR', 'SPX_rtn','SPXT_rtn']]
+print('xDF0 = ', xDF0.head())
+
+### These are the generic products we used in learning center.
+#-	2Y, 10% hard buffer, 1.5x upside up to 21%
+#-	4Y, 25% barrier, 1x upside no-cap
+#-	6Y, 30% barrier, 1.15x upside no-cap
+#################################################################
+
+xCap = 100000 #0.21  #10000  #100000 #0.21   #10000 #0.21 #0.21
+xBuffer = -0.30 #-0.30  #250  #-0.25   #-0.30   # -0.10   #-0.25
+
+xTerm = 6  #2  #4  #6   #4 #2  #3 # years
+xAmount = 100000
+xLever = 1.15  #1.15
+xBufferType = "T"  #"T"  # "H" for regular Buffer; "G" for Geared Buffer (or Barrier); "T" for Trigger Buffer!
+
+xPortfolio = pd.DataFrame()
+
+####################
+
+xDate = '2007-10-09'   #'2000-01-01'
+xStartDate = pd.to_datetime(xDate)   #datetime.date.fromisoformat(xDate)
+##########################################################################
+print('xStartDate = ', xStartDate)
+xEndDate = xStartDate + datetime.timedelta(days = 365*xTerm)
+print('xEndDate = ', xEndDate)
+##################### retrieve the stress start and end dates #############################
+xStressDates = pd.read_csv(xDir + 'xMajorDeclineDate.txt', usecols=['StartDate','EndDate'])
+xStressDates['StartDate'] = pd.to_datetime(xStressDates['StartDate'], format='%Y-%m-%d')
+xStressDates['EndDate'] = pd.to_datetime(xStressDates['EndDate'], format='%Y-%m-%d')
+
+xStressDateSet = []
+#xI = 0
+xResult_string = ''
+for xI in xStressDates.index:
+    xStressStartDate = pd.to_datetime(xStressDates.StartDate.values[xI],format='%Y-%m-%d')
+    xStressEndDate = pd.to_datetime(xStressDates.EndDate.values[xI],format='%Y-%m-%d')
+
+    xActualDF = xDF0.loc[(xDF0['DATE'] >= xStressStartDate) & (xDF0['DATE'] < xStressEndDate)]
+
+    xPeakSPX = xDF0.loc[xDF0['DATE']==xStressStartDate]['SPX'].values[0]
+    xTroughSPX = xDF0.loc[xDF0['DATE']==xStressEndDate]['SPX'].values[0]
+
+    xMDD = (xTroughSPX - xPeakSPX) / xPeakSPX
+
+    ################ calculate mean and std dev for 6 years (xTerm) back from xPeak Date ########
+    xSampleStartDate = xStressStartDate + datetime.timedelta(days = -365*xTerm)
+    xTemp = xDF0.loc[(xDF0['DATE']>=xSampleStartDate) & (xDF0['DATE']<xStressStartDate)]
+    if True:    # 15 years from 2005 to 2020
+        xTemp = xDF0.loc[(xDF0['DATE'] >= pd.to_datetime('2005-01-01')) & (xDF0['DATE'] < pd.to_datetime('2020-12-31'))]
+    else:
+        xStressDateSet = xStressDateSet + pd.date_range(xStressStartDate, xStressEndDate, freq='B').tolist()
+        if False:
+           xTemp = xDF0.loc[~xDF0['DATE'].isin(xStressDateSet)]
+        else:
+            xTemp = xDF0.loc[~xDF0['DATE'].isin(xStressDateSet) & (xDF0['DATE'] < xStressStartDate)]
+    xMu = xTemp['SPX_rtn'].mean() * 252 #annualized
+    xSigma = xTemp['SPX_rtn'].std() * np.sqrt(252) #annualized
+    xS0 = xTroughSPX
+
+    ##################
+    xEndDate0 = xStressStartDate + datetime.timedelta(days = 365*xTerm)
+    xDF0['Days'] = (xDF0['DATE'] - xEndDate0).dt.days
+    xTemp = xDF0.loc[xDF0['Days'] <= 0]
+    xTemp.reset_index(drop=True, inplace=True)
+    xEndDate = xTemp['DATE'][len(xTemp) - 1]  # this is the trading date!
+
+    ############### if the SI term is less than the stress period ##########
+    if xTerm < ((xStressEndDate - xStressStartDate).days / 365):
+        xIndexValueOnEndDate = xDF0.loc[xDF0['DATE'] == xEndDate]['SPX'].values[0]
+        xSPXTOnEndDate = xDF0.loc[xDF0['DATE'] == xEndDate]['SPXT'].values[0]
+        xSPXTOnStartDate = xDF0.loc[xDF0['DATE'] == xStressStartDate]['SPXT'].values[0]
+
+        xIndexGrowth = xIndexValueOnEndDate / xPeakSPX - 1
+        xSPXTGrowth = xSPXTOnEndDate / xSPXTOnStartDate - 1
+        if xBufferType == 'H':
+            xSIGrowth = xIndexGrowth - xBuffer
+        elif xBufferType == 'T':
+            if xIndexGrowth >= xBuffer:
+                xSIGrowth = 0
+            else:
+                xSIGrowth = xIndexGrowth
+        elif xBufferType == 'G':
+            xK = 1 / (1 + xBuffer)  # 100/(100-30) = 10/7
+            xSIGrowth = xK * (xIndexGrowth - xBuffer)
+        xString1 = ''
+        xSubTitle = ''
+        if xI == 0:
+            xSubTitle = 'Stress Period: Dotcom bubbles burst (' \
+                        + xStressStartDate.strftime('%m/%d/%Y') + ' - ' + xStressEndDate.strftime('%m/%d/%Y') + ')'
+        elif xI == 1:
+            xSubTitle = 'Stress Period: Financial crisis (' \
+                        + xStressStartDate.strftime('%m/%d/%Y') + ' - ' + xStressEndDate.strftime('%m/%d/%Y') + ')'
+        elif xI == 2:
+            xSubTitle = 'Stress Period: COVID-19 meltdown (' \
+                        + xStressStartDate.strftime('%m/%d/%Y') + ' - ' + xStressEndDate.strftime('%m/%d/%Y') + ')\n'
+        if xBufferType == 'H':
+            xString3 = 'Structure: ' + 'Buffer Type = ' + 'Hard Buffer' + '; Term = ' + (str)(xTerm) + ' years; ' + (
+                str)(xLever) + 'x Underlier; Cap = ' + '{:.1%}'.format(xCap) + '; Buffer = ' + '{:.1%}'.format(xBuffer) + '\n'
+        elif xBufferType == 'T':
+            xString3 = 'Structure: ' + 'Buffer Type = ' + 'Barrier Buffer' + '; Term = ' + (str)(xTerm) + ' years; ' + (
+                str)(xLever) + 'x Underlier; Cap = ' + '{:.1%}'.format(xCap)+ '; Buffer = ' + '{:.1%}'.format(xBuffer) + '\n'
+        elif xBufferType == 'G':
+            xString3 = 'Structure: ' + 'Buffer Type = ' + 'Geared Buffer' + '; Term = ' + (str)(xTerm) + ' years; ' + (
+                str)(xLever) + 'x Underlier; Cap = ' + '{:.1%}'.format(xCap) + '; Buffer = ' + '{:.1%}'.format(xBuffer) + '\n'
+        xString2 = 'From ' + xStressStartDate.strftime('%m/%d/%Y') + ' to ' + xEndDate.strftime('%m/%d/%Y') + ':\n' +\
+             'SI: ' + '{:.1%}'.format(xSIGrowth) + '\n' + 'SPXT: ' + '{:.1%}'.format(xSPXTGrowth) + '\n'
+
+        xString1 = xSubTitle + '\n' + xString3 + xString2
+        f_w = open(xDir + 'xActualResult_' + xBufferType + '_' + (str)(xTerm) + '_' + (str)(xI) + '.txt', 'w')
+        f_w.write(xString1)
+        f_w.close()
+        continue
+    ####################### end of term < stress period #################################
+    if len(xDF0.loc[xDF0['Days']>0]) == 0:
+        xFutureDates = pd.bdate_range(start= (xEndDate + datetime.timedelta(days = 1)),end=xEndDate0)
+        for xTempDate in xFutureDates:
+            xDF0 = xDF0.append({'DATE': xTempDate}, ignore_index = True)
+        xDF0['Days'] = (xDF0['DATE'] - xEndDate0).dt.days
+        xTemp = xDF0.loc[xDF0['Days']<=0]
+        xTemp.reset_index(drop=True,inplace=True)
+        xEndDate = xTemp['DATE'][len(xTemp)-1] # this is the trading date!
+    xTemp = xDF0.loc[(xDF0['DATE']>=xStressEndDate) & (xDF0['DATE']<=xEndDate)]
+    xCounts = len(xTemp)
+
+    xDates_axis = xTemp['DATE'].tolist()
+    xActual = xTemp['SPX'].tolist()
+
+    # Creates a list containing 5 lists, each of 8 items, all set to 0
+    #w, h = 8, 5
+    #Matrix = [[0 for x in range(w)] for y in range(h)]
+
+    xBucketDF = pd.DataFrame()
+    xBucketDF = xBucketDF.append({'Name': 'Above Peak','Level': xPeakSPX}, ignore_index=True)
+    #xBucketDF = xBucketDF.append({'Name': 'ActualAtEnd','Level': xActual[len(xActual) - 1]}, ignore_index=True)
+    xBucketDF = xBucketDF.append({'Name': 'Between Peak and Buffer','Level': xPeakSPX * (1 + xBuffer)}, ignore_index=True)
+    #xBucketDF = xBucketDF.append({'Name': 'Trough','Level': xTroughSPX}, ignore_index=True)
+
+    xBucketDF.sort_values(by=['Level'], ascending=False,  inplace=True)
+    xBucketDF.reset_index(drop=True,inplace=True)
+
+    xTotalNo = 0
+    xAboveNo_0 = 0
+    xNo_0_1 = 0
+    #xNo_1_2 = 0
+    #xNo_2_3 = 0
+    #xBelowNo_3 = 0
+    xBelowNo_1 = 0
+
+    xAbove_0 = 0
+    x0_1 = 0
+    #x1_2 = 0
+    #x2_3 = 0
+    #xBelow_3 = 0
+    xBelow_1 = 0
+
+    xAboveAvg_0 = 0
+    xAvg_0_1 = 0
+    #xAvg_1_2 = 0
+    #xAvg_2_3 = 0
+    #xAvg_Below_3 = 0
+    xAvg_Below_1 = 0
+
+    xSet_above_0 = set()
+    xSet_0_1 = set()
+    xSet_below_1 = set()
+
+    xPaths = 5001
+    xP = [[0 for x in range(xCounts)] for y in range(xPaths)]
+
+    xPath = 0
+    for xPath in range(0,xPaths):
+        xN = np.random.normal(0, 1, xCounts + 1)
+        for i in range(0,xCounts):
+            print (xPath, i)
+            if i==0:
+                xP[xPath][i] = xS0
+                continue
+            else:
+                xSt_1 = xP[xPath][i-1]
+                xDeltaS = xSt_1 * (xMu * 1 / 252 + xSigma * xN[i] * np.sqrt(1/252))
+                xP[xPath][i] = xSt_1 + xDeltaS
+            ######### calc stats ########
+            if i == (xCounts - 1):
+                if xP[xPath][i] > xBucketDF['Level'][0]:  #np.max(xActual[len(xActual) - 1], xPeakSPX):
+                    xAboveNo_0 = xAboveNo_0 + 1
+                    xAbove_0 = xAbove_0 + xP[xPath][i]
+                    xSet_above_0.add(xPath)
+                if (xP[xPath][i] < xBucketDF['Level'][0]) & (xP[xPath][i] > xBucketDF['Level'][1]):
+                    xNo_0_1 = xNo_0_1 + 1
+                    x0_1 = x0_1 + xP[xPath][i]
+                    xSet_0_1.add(xPath)
+                # if (xP[xPath][i] < xBucketDF['Level'][1]) & (xP[xPath][i] > xBucketDF['Level'][2]):
+                #     xNo_1_2 = xNo_1_2 + 1
+                #     x1_2 = x1_2 + xP[xPath][i]
+                # if (xP[xPath][i] < xBucketDF['Level'][2]) & (xP[xPath][i] > xBucketDF['Level'][3]):
+                #     xNo_2_3 = xNo_2_3 + 1
+                #     x2_3 = x2_3 + xP[xPath][i]
+                if xP[xPath][i] < xBucketDF['Level'][1]:
+                    xBelowNo_1 = xBelowNo_1 + 1
+                    xBelow_1 = xBelow_1 + xP[xPath][i]
+                    xSet_below_1.add(xPath)
+
+    try:
+        xAboveAvg_0 = xAbove_0 / xAboveNo_0
+    except:
+        {}
+    try:
+        xAvg_0_1 = x0_1 / xNo_0_1
+    except:
+        {}
+    try:
+        xBelowAvg_1 = xBelow_1 / xBelowNo_1
+    except:
+        {}
+
+    xTotalNo = xAboveNo_0 + xNo_0_1 + xBelowNo_1
+
+    xAboveNo_0_pct = xAboveNo_0 / xTotalNo
+    xNo_0_1_pct = xNo_0_1 / xTotalNo
+    xBelowNo_1_pct = xBelowNo_1 / xTotalNo
+
+    xBucketDF['Pct'] = np.nan
+    xBucketDF['Pct'][0] = xAboveNo_0_pct
+    xBucketDF['Pct'][1] = xNo_0_1_pct
+    #xBucketDF = xBucketDF.append({'Name': ('Below ' + xBucketDF['Name'][1]), 'Level': np.nan, 'Pct': xBelowNo_1_pct}, ignore_index=True)
+    xBucketDF = xBucketDF.append({'Name': 'Below Buffer', 'Level': np.nan, 'Pct': xBelowNo_1_pct},
+                                 ignore_index=True)
+    xBucketDF['Pct'] = xBucketDF['Pct'].astype(float).map("{:.1%}".format)
+
+    ###xBucketDF[['Name','Level','Pct']].to_csv(xDir + 'xSimulations_' + (str)(xTerm) + '_' + (str)(xI) + '.txt')
+    xSubTitle = ''
+    if xI == 0:
+        xSubTitle = 'Stress Period: Dotcom bubbles burst (' \
+                    + xStressStartDate.strftime('%m/%d/%Y') + ' - ' + xStressEndDate.strftime('%m/%d/%Y') +')'
+    elif xI == 1:
+        xSubTitle = 'Stress Period: Financial crisis (' \
+                    + xStressStartDate.strftime('%m/%d/%Y') + ' - ' + xStressEndDate.strftime('%m/%d/%Y') +')'
+    elif xI == 2:
+        xSubTitle = 'Stress Period: COVID-19 meltdown (' \
+                    + xStressStartDate.strftime('%m/%d/%Y') + ' - ' + xStressEndDate.strftime('%m/%d/%Y') +')'
+    if xTerm == 2:
+        xResult_string = xResult_string + 'Simulation Results for ' +(str)(xTerm) + ' Hard Buffer Note over ' + xSubTitle +':\n'
+    else:
+        xResult_string = xResult_string + 'Simulation Results for ' +(str)(xTerm) + ' Barrier Buffer Note over ' + xSubTitle +':\n\n'
+    xResult_string = xResult_string + (str)(xBucketDF[['Name','Level','Pct']].astype('string')) \
+                     + '\n\n' + 'SI expiration date: ' + xEndDate.strftime('%m/%d/%Y') +'\n\n'
+
+    xAvgList = []
+    xAvgList.append(xTroughSPX)
+    xAvgList_above_0 = []
+    xAvgList_above_0.append(xTroughSPX)
+    xAvgList_0_1 = []
+    xAvgList_0_1.append(xTroughSPX)
+    xAvgList_below_1 = []
+    xAvgList_below_1.append(xTroughSPX)
+    for i in range(0,xCounts-1):   #1154
+        xSum = 0
+        xNo = 0
+        xSum_above_0 = 0
+        xSum_0_1 = 0
+        xSum_below_1 = 0
+        xNo_above_0 = 0  # these numbers are calculated already; here recalculate them for double checking
+        xNo_0_1 = 0
+        xNo_below_1 = 0
+        for j in range(0, xPaths): #5001
+            xSum = xSum + xP[j][i]
+            xNo = xNo + 1
+            if j in xSet_above_0:
+                if xNo_above_0 < 1:
+                    xSum_above_0 = xSum_above_0 + xP[j][i]
+                    xNo_above_0 = xNo_above_0 + 1
+            elif j in xSet_0_1:
+                if xNo_0_1 < 1:
+                    xSum_0_1 = xSum_0_1 + xP[j][i]
+                    xNo_0_1 = xNo_0_1 + 1
+            elif j in xSet_below_1:
+                if xNo_below_1 < 1:
+                    xSum_below_1 = xSum_below_1 + xP[j][i]
+                    xNo_below_1 = xNo_below_1 + 1
+
+        try:
+            xAvgSum = xSum / xNo
+            xAvgList.append(xAvgSum)
+        except:
+            xAvgList.append(np.nan)
+        try:
+            xAvgSum_above_0 = xSum_above_0 / xNo_above_0
+            xAvgList_above_0.append(xAvgSum_above_0)
+        except:
+            xAvgList_above_0.append(np.nan)
+        try:
+            xAvgSum_0_1 = xSum_0_1 / xNo_0_1
+            xAvgList_0_1.append(xAvgSum_0_1)
+        except:
+            xAvgList_0_1.append(np.nan)
+        try:
+            xAvgSum_below_1 = xSum_below_1 / xNo_below_1
+            xAvgList_below_1.append(xAvgSum_below_1)
+        except:
+            xAvgList_below_1.append(np.nan)
+    #################
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+    import matplotlib.transforms as transforms
+
+    #plt.figure()
+    fig, ax = plt.subplots()
+    #############
+    if False:
+        #plt.locator_params(axis='x', nbins =7)
+        plt.plot(xDates_axis,xP[0],label='sample path_1')
+        plt.plot(xDates_axis,xP[1000],label='sample path_2')
+
+        plt.plot(xDates_axis,xActual, color='black',label='Actual')
+        plt.plot(xDates_axis,xAvgList, color='red',label='Simulated Avg')
+
+    else:
+        xActualDates = xActualDF['DATE'].to_list()
+        xActualDF['NAS'] = np.nan
+        xActualNAS = xActualDF['NAS'].to_list()
+        xActual0 = xActualDF['SPX'].to_list()
+
+        xDates_axis = xActualDates + xDates_axis
+        xP[0] = xActualNAS + xP[0]
+        xP[1000] = xActualNAS + xP[1000]
+        xActual = xActual0 + xActual
+        xAvgList = xActualNAS + xAvgList
+        xAvgList_above_0 = xActualNAS + xAvgList_above_0
+        xAvgList_0_1 = xActualNAS + xAvgList_0_1
+        xAvgList_below_1 = xActualNAS + xAvgList_below_1
+
+        xPeakLine = [xPeakSPX]*len(xDates_axis)
+        xBufferLine = [xPeakSPX*(1+xBuffer)]*len(xDates_axis)
+        #plt.plot(xDates_axis, xP[0], label='sample path_1')
+        #plt.plot(xDates_axis, xP[1000], label='sample path_2')
+
+        ax.plot(xDates_axis, xActual, color='black', label='Actual')
+        #plt.plot(xDates_axis, xPeakLine, color='cyan', label='Peak')
+        ax.axhline(y=xPeakSPX, color='cyan', linestyle='--') #, label='Peak')
+        ax.axhline(y=xPeakSPX*(1+xBuffer), color='magenta', linestyle='--') #,label='Buffer')
+        #plt.plot(xDates_axis, xBufferLine, color='magenta', label='Buffer')
+        #plt.plot(xDates_axis, xAvgList, color='red', label='Simulated Avg')
+        ax.plot(xDates_axis, xAvgList_above_0, color='red', \
+                 label='Sample ' + xBucketDF['Name'][0] + '(with Prob of ' + xBucketDF['Pct'][0]+')')
+        ax.plot(xDates_axis, xAvgList_0_1, color='blue', \
+                 label='Sample ' + xBucketDF['Name'][1]+ '(with Prob of ' + xBucketDF['Pct'][1]+')')
+        ax.plot(xDates_axis, xAvgList_below_1, color='orange', \
+                 label='Sample ' + xBucketDF['Name'][2]+ '(with Prob of ' + xBucketDF['Pct'][2]+')')
+
+        trans = transforms.blended_transform_factory(
+            ax.get_yticklabels()[0].get_transform(), ax.transData)
+        ax.text(0, xPeakSPX, 'Peak', color="cyan", transform=trans,
+                ha="right", va="center")
+        ax.text(0, xPeakSPX*(1+xBuffer), 'Buffer', color="magenta",
+                transform=trans, ha="right", va="center")
+    plt.legend(loc='best')
+    ax = plt.gca()
+    #ax.xaxis.set_major_locator(mdates.YearLocator(2, month=1, day=1))
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    plt.ylabel('The S&P 500 Index')
+    plt.gcf().autofmt_xdate()
+    if xTerm == 2:
+        plt.suptitle('Simulation Results for ' + (str)(xTerm) + ' Years Hard Buffer Note\n'
+                + xSubTitle)
+    elif xTerm in {4,6}:
+        plt.suptitle('Simulation Results for ' + (str)(xTerm) + ' Years Barrier Buffer Note\n'
+                + xSubTitle)
+    plt.savefig(xDir + 'xSimulationResults_' + (str)(xTerm) + '_' + (str)(xI)+'.png')
+    plt.show()
+    print("i am done")
+
+f_w = open(xDir + 'xSimulationResults_' + xBufferType + '_' + (str)(xTerm) + '.txt','w')
+f_w.write(xResult_string)
+f_w.close()

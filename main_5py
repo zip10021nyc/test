@@ -1,0 +1,592 @@
+### Portfolio Optiimization
+### Sean Welleck | 2014
+#
+# Finds an optimal allocation of stocks in a portfolio,
+# satisfying a minimum expected return.
+# The problem is posed as a Quadratic Program, and solved
+# using the cvxopt library.
+# Uses actual past stock data, obtained using the stocks module.
+import math
+import numpy as np
+import pandas as pd
+import datetime
+import cvxopt
+from cvxopt import matrix, solvers
+import matplotlib.pyplot as plt
+##########################
+import warnings
+warnings.filterwarnings('ignore')
+warnings.warn('DelftStack')
+warnings.warn('Do not show this message')
+#####################
+solvers.options['show_progress'] = False        # !!!
+
+pd.set_option('display.max_rows', 500)
+pd.set_option('display.max_columns', 500)
+pd.set_option('display.width', 1000)
+
+#from cvxopt import solvers
+#import stocks
+import numpy
+import pandas as pd
+import datetime
+
+# c = cvxopt.matrix([0, -1], tc='d')
+# print('c: ', c)
+# c = numpy.matrix(c)
+# print('c: ', c)
+#
+# c = cvxopt.matrix([0, -1])
+# print('c: ', c)
+# G = cvxopt.matrix([[-1, 1], [3, 2], [2, 3], [-1, 0], [0, -1]], tc='d')
+# print('G: ', G)
+##################
+xDir = r'D:\\Users\\ggu\\Documents\\GU\\MeanVarianceOptimization\\'
+xSPXT = pd.read_csv(xDir + 'SPXT.txt')
+xSPXT['DATE'] = pd.to_datetime(xSPXT['DATE'], format='%m/%d/%Y')
+xAggregateBondTR = pd.read_csv(xDir + 'AggregateBondTR.txt')
+xAggregateBondTR['DATE'] = pd.to_datetime(xAggregateBondTR['DATE'], format='%m/%d/%Y')
+
+# xSI = pd.read_csv(xDir + 'SI.txt')
+# xSI['DATE'] = pd.to_datetime(xSI['DATE'], format='%m/%d/%Y')
+
+xSPX = pd.read_csv(xDir + 'SPX.txt')
+xSPX['DATE'] = pd.to_datetime(xSPX['DATE'], format='%m/%d/%Y')
+
+##xAggregateBondTR = pd.read_csv(xDir + 'AggregateBondTR.txt')
+
+print(xSPXT.head())
+print(xAggregateBondTR.head())
+#print(xSI.head())
+print(xSPX.head())
+
+# xSPXT = pd.merge(xSPXT, xSI, on=['DATE'], how='left')
+xSPXT = pd.merge(xSPXT, xAggregateBondTR, on=['DATE'], how='left')
+xSPXT = pd.merge(xSPXT, xSPX, on=['DATE'], how='left')
+
+# xMinDateSI = xSI['DATE'].min()
+# xMaxDateSI = xSI['DATE'].max()
+
+###xSPXT = xSPXT.loc[(xSPXT['DATE'] >= xMinDateSI) & (xSPXT['DATE'] <= xMaxDateSI)]
+
+#xSPXT['intrinsic_value'].fillna(method='ffill', inplace=True) #fill N/As with previous prices!!!!
+xSPXT['LBUSTRUU'].fillna(method='ffill', inplace=True) #fill N/As with previous prices!!!!
+xSPXT['SPX'].fillna(method='ffill', inplace=True)
+
+xSPXT.rename(columns={'LBUSTRUU': 'BondTR'},inplace=True)
+
+xSPXT['SPXT_rtn'] = xSPXT['SPXT'].pct_change()
+#xSPXT['SI_rtn'] = xSPXT['intrinsic_value'].pct_change()
+xSPXT['BondTR_rtn'] = xSPXT['BondTR'].pct_change()
+xSPXT['SPX_rtn'] = xSPXT['SPX'].pct_change()
+
+xSPXT.to_csv(xDir + 'xSPXT.txt')
+
+xSPXT = xSPXT.dropna()
+########################
+xUnderlier = 'SPX'
+
+#xDF0 = xSPXT[['DATE', xUnderlier,'SPXT','SPXT_rtn','BondTR','BondTR_rtn']]
+xDF0 = xSPXT[['DATE', xUnderlier,'SPXT','BondTR']]
+print('xDF0 = ', xDF0.head())
+
+### These are the generic products we used in learning center.
+#-	2Y, 10% hard buffer, 1.5x upside up to 21%
+#-	4Y, 25% barrier, 1x upside no-cap
+#-	6Y, 30% barrier, 1.15x upside no-cap
+#################################################################
+
+xCap = 100000 #0.21  #10000  #100000 #0.21   #10000 #0.21 #0.21
+xBuffer = -0.30 #-0.30  #250  #-0.25   #-0.30   # -0.10   #-0.25
+
+xTerm = 6  #2  #4  #6   #4 #2  #3 # years
+xAmount = 100000
+xLever = 1.15  #1.15
+xBufferType = "T"  #"T"  # "H" for regular Buffer; "G" for Geared Buffer (or Barrier); "T" for Trigger Buffer!
+
+xPortfolio = pd.DataFrame()
+
+####################
+
+xDate = '2007-10-09'   #'2000-01-01'
+xStartDate = pd.to_datetime(xDate)   #datetime.date.fromisoformat(xDate)
+##########################################################################
+print('xStartDate = ', xStartDate)
+xEndDate = xStartDate + datetime.timedelta(days = 365*xTerm)
+print('xEndDate = ', xEndDate)
+##################### retrieve the stress start and end dates #############################
+xStressDates = pd.read_csv(xDir + 'xMajorDeclineDate.txt', usecols=['StartDate','EndDate'])
+xStressDates['StartDate'] = pd.to_datetime(xStressDates['StartDate'], format='%Y-%m-%d')
+xStressDates['EndDate'] = pd.to_datetime(xStressDates['EndDate'], format='%Y-%m-%d')
+
+############## select stress period #####################
+#xI = 2
+xString0 =''
+for xI in range(0,3): #range(1,2):   #range(0,3)
+	xStressStartDate = pd.to_datetime(xStressDates.StartDate.values[xI],format='%Y-%m-%d')
+	xStressEndDate = pd.to_datetime(xStressDates.EndDate.values[xI],format='%Y-%m-%d')
+	#xScenario = 1
+	for xScenario in range(1,7): #range(1,2):  #range(1,7)	#7 is NOT included
+		if xScenario == 1:
+			xStartDate = xStressStartDate
+			xEffectiveStressStartDate = xStressStartDate
+			xEndDate = xStartDate + datetime.timedelta(days=365 * xTerm)
+			xDF0['Days'] = (xDF0['DATE'] - xEndDate).dt.days
+			xTemp = xDF0.loc[xDF0['Days']<=0]
+			xTemp.reset_index(drop=True,inplace=True)
+			xEndDate = xTemp['DATE'][len(xTemp)-1] # this is the trading date!
+			xEffectiveStressEndDate = min(xEndDate, xStressEndDate)
+		elif xScenario == 2:
+			xStartDate = xStressStartDate + datetime.timedelta(days=-365 * round(xTerm / 3,0))
+			xDF0['Days'] = (xDF0['DATE'] - xStartDate).dt.days
+			xTemp = xDF0.loc[xDF0['Days'] >= 0]
+			xTemp.reset_index(drop=True, inplace=True)
+			xStartDate = xTemp['DATE'][0]  # this is the trading date!
+			xEffectiveStressStartDate = xStressStartDate
+			xEndDate = xStartDate + datetime.timedelta(days=365 * xTerm)
+			xDF0['Days'] = (xDF0['DATE'] - xEndDate).dt.days
+			xTemp = xDF0.loc[xDF0['Days'] <= 0]
+			xTemp.reset_index(drop=True, inplace=True)
+			xEndDate = xTemp['DATE'][len(xTemp) - 1]  # this is the trading date!
+			xEffectiveStressEndDate = min(xEndDate, xStressEndDate)
+		elif xScenario == 3:
+			xStartDate = xStressStartDate + datetime.timedelta(days=-365 * round(xTerm / 2, 0))
+			xDF0['Days'] = (xDF0['DATE'] - xStartDate).dt.days
+			xTemp = xDF0.loc[xDF0['Days'] >= 0]
+			xTemp.reset_index(drop=True, inplace=True)
+			xStartDate = xTemp['DATE'][0]  # this is the trading date!
+			xEffectiveStressStartDate = xStressStartDate
+			xEndDate = xStartDate + datetime.timedelta(days=365 * xTerm)
+			xDF0['Days'] = (xDF0['DATE'] - xEndDate).dt.days
+			xTemp = xDF0.loc[xDF0['Days'] <= 0]
+			xTemp.reset_index(drop=True, inplace=True)
+			xEndDate = xTemp['DATE'][len(xTemp) - 1]  # this is the trading date!
+			xEffectiveStressEndDate = min(xEndDate, xStressEndDate)
+		elif xScenario == 4:
+			xEndDate = xStressEndDate
+			xEffectiveStressEndDate = xStressEndDate
+			xStartDate = xEndDate + datetime.timedelta(days=-365 * xTerm)
+			xDF0['Days'] = (xDF0['DATE'] - xStartDate).dt.days
+			xTemp = xDF0.loc[xDF0['Days'] >= 0]
+			xTemp.reset_index(drop=True, inplace=True)
+			xStartDate = xTemp['DATE'][0]  # this is the trading date!
+			xEffectiveStressStartDate = max(xStressStartDate, xStartDate)
+		elif xScenario == 5:
+			xEndDate = xStressEndDate + datetime.timedelta(days=365 * round(xTerm / 3, 0))
+			xDF0['Days'] = (xDF0['DATE'] - xEndDate).dt.days
+			xTemp = xDF0.loc[xDF0['Days'] <= 0]
+			xTemp.reset_index(drop=True, inplace=True)
+			xEndDate = xTemp['DATE'][len(xTemp) - 1]  # this is the trading date!
+			xEffectiveStressEndDate = xStressEndDate
+			xStartDate = xEndDate + datetime.timedelta(days=-365 * xTerm)
+			xDF0['Days'] = (xDF0['DATE'] - xStartDate).dt.days
+			xTemp = xDF0.loc[xDF0['Days'] >= 0]
+			xTemp.reset_index(drop=True, inplace=True)
+			xStartDate = xTemp['DATE'][0]  # this is the trading date!
+			xEffectiveStressStartDate = max(xStressStartDate, xStartDate)
+		elif xScenario == 6:
+			xEndDate = xStressEndDate + datetime.timedelta(days=365 * round(xTerm / 2, 0))
+			xDF0['Days'] = (xDF0['DATE'] - xEndDate).dt.days
+			xTemp = xDF0.loc[xDF0['Days'] <= 0]
+			xTemp.reset_index(drop=True, inplace=True)
+			xEndDate = xTemp['DATE'][len(xTemp) - 1]  # this is the trading date!
+			xEffectiveStressEndDate = xStressEndDate
+			xStartDate = xEndDate + datetime.timedelta(days=-365 * xTerm)
+			xDF0['Days'] = (xDF0['DATE'] - xStartDate).dt.days
+			xTemp = xDF0.loc[xDF0['Days'] >= 0]
+			xTemp.reset_index(drop=True, inplace=True)
+			xStartDate = xTemp['DATE'][0]  # this is the trading date!
+			xEffectiveStressStartDate = max(xStressStartDate, xStartDate)
+		#
+		# ############# SI starts at the peak!!! #######
+		# xStartDate = xStressStartDate
+		# xEndDate = xStressEndDate
+		# ############# SI ends at the trough ##########
+		# if False:
+		# 	xStartDate = xEndDate + datetime.timedelta(days = -365*xTerm)
+		# ######### this is to set the start date as the trough 1 year ago #########
+		# x1YearAgo = 0
+		# if x1YearAgo == 1:
+		# 	xStartDate2 = xStartDate + datetime.timedelta(days = -365)	# one year ago from the stress start date!
+		# 	xDF = xDF0.loc[(xDF0['DATE'] >= xStartDate2) & (xDF0['DATE'] <= xStartDate)]
+		# 	xMin_SPX = xDF['SPX'].min()
+		# 	xStartDate = pd.to_datetime(xDF.loc[xDF['SPX']==xMin_SPX]['DATE'].values[0])	# this is trough...lowest point
+		# #####################
+		# xSIEndDate = xStartDate + datetime.timedelta(days = 365*xTerm)
+		########### debug ############
+		print('Stress Cycle: ' + (str)(xI) + ';  Scenario: ' + (str)(xScenario))
+		print('Start date: ', xStartDate, '; End date:', xEndDate)
+		##############################
+		#xDF = xDF0.loc[(xDF0['DATE'] >= xStartDate.strftime('%Y-%m-%d')) & (xDF0['DATE'] <= xEndDate.strftime('%Y-%m-%d'))]
+		xDF = xDF0.loc[(xDF0['DATE'] >= xStartDate) & (xDF0['DATE'] <= xEndDate)]
+		#xDF = xDF0.loc[(xDF0['DATE'] >= xStartDate)]
+		xDF.reset_index(drop=True, inplace=True)
+		###### in case xEndDate does NOT exist in xDF, then reassign the latest date less than the original xEndDate ###
+		xEndDate = pd.to_datetime(xDF.loc[xDF.index == (len(xDF)-1)]['DATE'].values[0])
+
+		xDF[xUnderlier+'_rtn'] = xDF[xUnderlier].pct_change()
+		xDF['SPXT_rtn'] = xDF['SPXT'].pct_change()
+		xDF['BondTR_rtn'] = xDF['BondTR'].pct_change()
+		xDF['CumRtn_SPXT'] = (1 + xDF['SPXT_rtn']).cumprod() - 1
+		xDF['CumRtn_BondTR'] = (1 + xDF['BondTR_rtn']).cumprod() - 1
+		xDF['CumRtn_UL'] = (1 + xDF[xUnderlier+'_rtn']).cumprod() - 1
+		xDF['CumRtn_SI'] = xDF['CumRtn_UL'].copy()
+
+		xTime = 0
+		xString3 = 'Structure: ' + 'Buffer Type = ' + xBufferType + '; Term = ' + (str)(xTerm) + ' years; ' + (str)(xLever) + 'x Underlier; Cap = '  + (str)(xCap) + '; Buffer = ' + (str)(xBuffer)
+		xStartDate0 = xStartDate
+		#xStartValue = xDF.loc[xDF.index==0][xUnderlier][0]
+		xStartValue = xAmount
+		xW_equity_pv1 = 0.7
+		xW_bond_pv1 = 0.3
+		xW_equity_pv2 = 0.7
+		xW_bond_pv2 = 0.15
+		xW_SI_pv2 = 0.15
+
+		###while (xDF.empty != True):	#this may not work properly because xStartDate = xEndDate = 1 row onlu!!!!
+		#while (xStartDate != xEndDate):
+		for xTempDate in xDF['DATE']:
+			print('date = ', xTempDate)
+			xTime = xTime + 1
+
+			xCumRtn_UL = xDF.loc[xDF['DATE']==xTempDate]['CumRtn_UL'].values[0]
+			if (xBufferType == 'T'):
+				if (xCumRtn_UL < xBuffer):
+					xDF.loc[xDF['DATE'] == xTempDate, 'CumRtn_SI'] = xCumRtn_UL
+				elif (xCumRtn_UL <= 0):
+					xDF.loc[xDF['DATE'] == xTempDate, 'CumRtn_SI'] = 0
+				elif (xCumRtn_UL * xLever > xCap):  #(((xCumRtn_UL + 1) * xLever - 1)> xCap):  #
+					xDF.loc[xDF['DATE'] == xTempDate, 'CumRtn_SI'] = xCap
+				else:
+					xDF.loc[xDF['DATE'] == xTempDate, 'CumRtn_SI'] = xCumRtn_UL * xLever
+			elif (xBufferType == 'H'):
+				if (xCumRtn_UL < xBuffer):
+					xDF.loc[xDF['DATE'] == xTempDate, 'CumRtn_SI'] = xCumRtn_UL - xBuffer
+				elif (xCumRtn_UL <= 0):
+					xDF.loc[xDF['DATE'] == xTempDate, 'CumRtn_SI'] = 0
+				elif (xCumRtn_UL * xLever > xCap):   # (((xCumRtn_UL + 1) * xLever - 1)> xCap):
+					xDF.loc[xDF['DATE'] == xTempDate, 'CumRtn_SI'] = xCap
+				else:
+					xDF.loc[xDF['DATE'] == xTempDate, 'CumRtn_SI'] = xCumRtn_UL * xLever
+			elif (xBufferType == 'G'):
+				if (xCumRtn_UL < xBuffer):
+					xK = 1 / (1 + xBuffer)  # 100/(100-30) = 10/7
+					xDF.loc[xDF['DATE'] == xTempDate, 'CumRtn_SI'] = xK * (xCumRtn_UL - xBuffer)
+				elif (xCumRtn_UL <= 0):
+					xDF.loc[xDF['DATE'] == xTempDate, 'CumRtn_SI'] = 0
+				elif (xCumRtn_UL * xLever > xCap):   #(((xCumRtn_UL + 1) * xLever - 1)> xCap): #
+					xDF.loc[xDF['DATE'] == xTempDate, 'CumRtn_SI'] = xCap
+				else:
+					xDF.loc[xDF['DATE'] == xTempDate, 'CumRtn_SI'] = xCumRtn_UL * xLever
+			##################################################################################################################
+			############# calculate IV and Portfolio Values (PV) ########
+			if xTime == 1:
+				xDF.loc[xDF['DATE'] == xTempDate, 'IV'] = xAmount
+
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV1_SPXT'] = xAmount * xW_equity_pv1
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV1_BondTR'] = xAmount * xW_bond_pv1
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV1'] = xAmount
+
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV2_SPXT'] = xAmount * xW_equity_pv2
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV2_BondTR'] = xAmount * xW_bond_pv2
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV2_SI'] = xAmount * xW_SI_pv2
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV2'] = xAmount
+
+				xDF.loc[xDF['DATE'] == xTempDate, 'SPXT_100'] = xAmount
+			else:
+				xDF.loc[xDF['DATE'] == xTempDate, 'IV'] = (1+xDF.loc[xDF['DATE'] == xTempDate]['CumRtn_SI'].values[0]) * xAmount
+
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV1_SPXT'] = (1+xDF.loc[xDF['DATE'] == xTempDate]['SPXT_rtn'].values[0]) * \
+																xDF.loc[xDF['DATE'] == xPreviousDate]['PV1_SPXT'].values[0]
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV1_BondTR'] = (1+xDF.loc[xDF['DATE'] == xTempDate]['BondTR_rtn'].values[0]) * \
+																xDF.loc[xDF['DATE'] == xPreviousDate]['PV1_BondTR'].values[0]
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV1'] = xDF.loc[xDF['DATE'] == xTempDate]['PV1_SPXT'].values[0] + \
+																xDF.loc[xDF['DATE'] == xTempDate]['PV1_BondTR'].values[0]
+
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV2_SPXT'] = (1+xDF.loc[xDF['DATE'] == xTempDate]['SPXT_rtn'].values[0]) * \
+																xDF.loc[xDF['DATE'] == xPreviousDate]['PV2_SPXT'].values[0]
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV2_BondTR'] = (1 + xDF.loc[xDF['DATE'] == xTempDate]['BondTR_rtn'].values[0]) * \
+																  xDF.loc[xDF['DATE'] == xPreviousDate]['PV2_BondTR'].values[0]
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV2_SI'] = (1 + xDF.loc[xDF['DATE'] == xTempDate]['CumRtn_SI'].values[0]) * \
+															  (xAmount * xW_SI_pv2)
+
+				xDF.loc[xDF['DATE'] == xTempDate, 'PV2'] = xDF.loc[xDF['DATE'] == xTempDate]['PV2_SPXT'].values[0] +\
+														   xDF.loc[xDF['DATE'] == xTempDate]['PV2_BondTR'].values[0] +\
+														   xDF.loc[xDF['DATE'] == xTempDate]['PV2_SI'].values[0]
+
+				xDF.loc[xDF['DATE'] == xTempDate, 'SPXT_100'] = (1 + xDF.loc[xDF['DATE'] == xTempDate]['SPXT_rtn'].values[0]) * \
+															xDF.loc[xDF['DATE'] == xPreviousDate]['SPXT_100'].values[0]
+
+			xPreviousDate = xTempDate
+			xTime = xTime + 1
+
+		xDF['SPX_growth'] = xDF['SPX'].pct_change(len(xDF)-1)
+		xDF['SPXT_growth'] = xDF['SPXT'].pct_change(len(xDF)-1)
+		xDF['BondTR_growth'] = xDF['BondTR'].pct_change(len(xDF)-1)
+		xDF['IV_growth'] = xDF['IV'].pct_change(len(xDF)-1)
+		xDF['PV1_SPXT_growth'] = xDF['PV1_SPXT'].pct_change(len(xDF)-1)
+		xDF['PV1_BondTR_growth'] = xDF['PV1_BondTR'].pct_change(len(xDF)-1)
+		xDF['PV1_growth'] = xDF['PV1'].pct_change(len(xDF)-1)
+		xDF['PV2_SPXT_growth'] = xDF['PV2_SPXT'].pct_change(len(xDF)-1)
+		xDF['PV2_BondTR_growth'] = xDF['PV2_BondTR'].pct_change(len(xDF)-1)
+		xDF['PV2_SI_growth'] = xDF['PV2_SI'].pct_change(len(xDF)-1)
+		xDF['PV2_growth'] = xDF['PV2'].pct_change(len(xDF)-1)
+		xDF['SPXT_100_growth'] = xDF['SPXT_100'].pct_change(len(xDF)-1)
+
+		xGrowth = xDF[['SPX_growth','SPXT_growth','BondTR_growth','IV_growth','PV1_SPXT_growth','PV1_BondTR_growth',\
+					   'PV1_growth','PV2_SPXT_growth','PV2_BondTR_growth','PV2_SI_growth','PV2_growth','SPXT_100_growth']].copy()
+
+		xGrowth.dropna(inplace=True)
+		xG = xGrowth.T
+		xDF.to_csv(xDir + 'xStressTest_'+(str)(xTerm)+'.txt')
+		xG.to_csv(xDir + 'xStressTest_Growth'+(str)(xTerm)+'.txt')
+		xColName = xG.columns[0]
+		xSPXT_exp = xG[xColName]['SPXT_growth']
+		xSI_exp = xG[xColName]['IV_growth']
+		########################### find SI value on peak date and trough date ##################
+		xSI_peak = xDF.loc[xDF['DATE']==xEffectiveStressStartDate]['IV'].values[0]
+		xSI_trough = xDF.loc[xDF['DATE'] == xEffectiveStressEndDate]['IV'].values[0]
+		xSI_decline = xSI_trough / xSI_peak - 1.0
+		xSPXT_peak = xDF.loc[xDF['DATE'] == xEffectiveStressStartDate]['SPXT'].values[0]
+		xSPXT_trough = xDF.loc[xDF['DATE'] == xEffectiveStressEndDate]['SPXT'].values[0]
+		xSPXT_decline = xSPXT_trough / xSPXT_peak - 1.0
+		########### we only compare the performance during the stree perio!!! ######################
+		####xDF2 = xDF.loc[(xDF['DATE']>=xStressStartDate)&(xDF['DATE']<=xStressEndDate)][['DATE','CumRtn_SPXT','CumRtn_SI','CumRtn_UL']].copy()
+		xDF2 = xDF.loc[(xDF['DATE']>=xEffectiveStressStartDate)&(xDF['DATE']<=xEffectiveStressEndDate)][['DATE','CumRtn_SPXT','CumRtn_SI','CumRtn_UL']].copy()
+		############################################################################################
+		xDF2['Category'] = 'Full Protection'  # = 0 is fully protected!
+		xDF2.loc[xDF2['CumRtn_SI']>0,'Category']='Upside Gain'
+		xDF2.loc[xDF2['CumRtn_SI']<0,'Category']='No/Partial Protection'
+
+		xPerformance = xDF2.groupby('Category')['CumRtn_SPXT','CumRtn_SI'].mean()
+		xDays = xDF2.groupby('Category')['CumRtn_SPXT','CumRtn_SI'].count()
+		xPerformance.reset_index(inplace=True)
+		xDays.reset_index(inplace=True)
+
+		xDays.rename(columns={'CumRtn_SPXT': 'Days'},inplace=True)
+
+		xPerformance = pd.merge(xPerformance,xDays[['Category','Days']],on=['Category'],how='left')
+
+		if len(xPerformance.loc[xPerformance['Category']=='Full Protection'])!=0:
+			xIndex = xPerformance.loc[xPerformance['Category']=='Full Protection'].index.values[0]
+			xSPXT_FP = xPerformance.values[xIndex][1]
+			xSI_FP = xPerformance.values[xIndex][2]
+			xDays_FP = xDays.values[xIndex][1]
+		else:
+			xSPXT_FP = 0.0000000001
+			xSI_FP = 0.00000000001
+			xDays_FP = 0.00000000001
+			xPerformance = xPerformance.append({'Category': 'Full Protection',
+												'CumRtn_SPXT': xSPXT_FP, 'CumRtn_SI': xSI_FP, 'Days': xDays_FP}, \
+											   ignore_index=True)
+		#########
+		if len(xPerformance.loc[xPerformance['Category']=='No/Partial Protection'])!=0:
+			xIndex = xPerformance.loc[xPerformance['Category']=='No/Partial Protection'].index.values[0]
+			xSPXT_NP = xPerformance.values[xIndex][1]
+			xSI_NP = xPerformance.values[xIndex][2]
+			xDays_NP = xDays.values[xIndex][1]
+		else:
+			xSPXT_NP = 0.0000000001
+			xSI_NP = 0.00000000001
+			xDays_NP = 0.00000000001
+			xPerformance = xPerformance.append({'Category': 'No/Partial Protection',
+												'CumRtn_SPXT': xSPXT_NP, 'CumRtn_SI': xSI_NP, 'Days': xDays_NP}, \
+											   ignore_index=True)
+		###############
+		if len(xPerformance.loc[xPerformance['Category']=='Upside Gain'])!=0:
+			xIndex = xPerformance.loc[xPerformance['Category']=='Upside Gain'].index.values[0]
+			xSPXT_UG = xPerformance.values[xIndex][1]
+			xSI_UG = xPerformance.values[xIndex][2]
+			xDays_UG = xDays.values[xIndex][1]
+		else:
+			xSPXT_UG = 0.0000000001
+			xSI_UG = 0.00000000001
+			xDays_UG = 0.00000000001
+			xPerformance = xPerformance.append({'Category': 'Upside Gain',
+												'CumRtn_SPXT': xSPXT_UG, 'CumRtn_SI': xSI_UG, 'Days': xDays_UG}, \
+											   ignore_index=True)
+
+		#############
+		xPerformance = xPerformance.sort_values(by=['Category'], ascending=True)
+		################
+		xPerformanceAll = xDF2[['CumRtn_SPXT','CumRtn_SI']].mean()
+		xDaysAll = xDF2[['CumRtn_SPXT','CumRtn_SI']].count()
+
+		xSPXT_all = xPerformanceAll[0]
+		xSI_all = xPerformanceAll[1]
+
+		xDays_all = xDaysAll[0]
+
+		xPerformance = xPerformance.append({'Category':'Overall Average',
+						'CumRtn_SPXT':xSPXT_all, 'CumRtn_SI':xSI_all, 'Days':xDays_all}, \
+									 ignore_index=True)
+
+		xDays_peak2trough = (xEffectiveStressEndDate-xEffectiveStressStartDate).days
+
+		xPerformance = xPerformance.append({'Category': 'From Peak to Trough',
+											'CumRtn_SPXT': xSPXT_decline, 'CumRtn_SI': xSI_decline, 'Days': xDays_peak2trough}, \
+										   ignore_index=True)
+		# xPerformance = xPerformance.append({'Category':'On Expiration Date',
+		# 				'CumRtn_SPXT':xSPXT_exp, 'CumRtn_SI':xSI_exp, 'Days':0.00000000001}, \
+		# 							 ignore_index=True)
+
+		xPerformance['CumRtn_SPXT'] = xPerformance['CumRtn_SPXT'].astype(float).map("{:.2%}".format)
+		xPerformance['CumRtn_SI'] = xPerformance['CumRtn_SI'].astype(float).map("{:.2%}".format)
+		xPerformance['Days'] = xPerformance['Days'].round(0) #.astype(int).map("{:.0}".format)
+
+		xPerformance.rename(columns={'CumRtn_SPXT': 'S&P 500 TR Index','CumRtn_SI': 'SI_'+(str)(xTerm)},inplace=True)
+
+		xResult_String = (str)(xPerformance.astype('string'))
+
+		xPerformance.to_csv(xDir+'xStressTestResult_'+(str)(xTerm)+'.txt')
+
+		globals()['xString_' + (str)(xScenario) + '_' + (str)(xI)] = 'Stress Period #' + (str)(xI) + ' and Scenario #' +(str)(xScenario) + ':' + \
+		'\nStress period from ' + xStressStartDate.strftime('%Y-%m-%d') + ' to ' + xStressEndDate.strftime('%Y-%m-%d') + \
+		'\nSI start date: ' + xStartDate.strftime('%Y-%m-%d') +'; SI maturity date:' +xEndDate.strftime('%Y-%m-%d') + \
+		'\nEffective Stress period from ' + xEffectiveStressStartDate.strftime('%Y-%m-%d') + ' to ' + \
+				xEffectiveStressEndDate.strftime('%Y-%m-%d')
+		#xString1 = 'From ' + xStartDate.strftime('%Y-%m-%d') + ' to ' + xEndDate.strftime('%Y-%m-%d') +':'
+
+		xString0 = xString0 + '\n' + globals()['xString_' + (str)(xScenario) + '_' + (str)(xI)] + \
+			'\n\n' + xResult_String +'\n'
+
+f_w = open(xDir + 'xStressTestResult_' + xBufferType + '_' + (str)(xTerm) + '.txt','w')
+f_w.write(xString0)
+f_w.close()
+
+
+#xPerformanceALl.reset_index(inplace=True)
+#xDaysAll.reset_index(inplace=True)
+
+
+
+
+
+
+#xPerformanceALl.reset_index(inplace=True)
+#xDaysAll.reset_index(inplace=True)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##################### plot bar chart #########################
+from matplotlib import pyplot as plt
+
+def mk_groups(data):
+	try:
+		newdata = data.items()
+	except:
+		return
+
+	thisgroup = []
+	groups = []
+	for key, value in newdata:
+		newgroups = mk_groups(value)
+		if newgroups is None:
+			thisgroup.append((key, value))
+		else:
+			thisgroup.append((key, len(newgroups[-1])))
+			if groups:
+				groups = [g + n for n, g in zip(newgroups, groups)]
+			else:
+				groups = newgroups
+	return [thisgroup] + groups
+
+def add_line(ax, xpos, ypos):
+	line = plt.Line2D([xpos, xpos], [ypos + .1, ypos],
+                      transform=ax.transAxes, color='black')
+	line.set_clip_on(False)
+	ax.add_line(line)
+
+def label_group_bar(ax, data):
+	groups = mk_groups(data)
+	xy = groups.pop()
+	x, y = zip(*xy)
+	ly = len(y)
+	xticks = range(1, ly + 1)
+
+	ax.bar(xticks, y, align='center')
+	ax.set_xticks(xticks)
+	ax.set_xticklabels(x)
+	ax.set_xlim(.5, ly + .5)
+	ax.yaxis.grid(True)
+
+	scale = 1. / ly
+	#for pos in xrange(ly + 1):  # change xrange to range for python3
+	for pos in range(ly + 1):
+		add_line(ax, pos * scale, -.1)
+	ypos = -.2
+	while groups:
+		group = groups.pop()
+		pos = 0
+		for label, rpos in group:
+			lxpos = (pos + .5 * rpos) * scale
+			ax.text(lxpos, ypos, label, ha='center', transform=ax.transAxes)
+			add_line(ax, pos * scale, ypos)
+			pos += rpos
+		add_line(ax, pos * scale, ypos)
+		ypos -= .1
+###################
+# data = {'Room A':
+#                {'Shelf 1':
+#                    {'Milk': 10,
+#                     'Water': 20},
+#                 'Shelf 2':
+#                    {'Sugar': 5,
+#                     'Honey': 6},
+# 				'Shelf 2a':
+#                    {'Sugar': 7,
+#                     'Honey': 8}
+#                },
+#             'Room B':
+#                {'Shelf 1':
+#                    {'Wheat': 4,
+#                     'Corn': 7},
+#                 'Shelf 2':
+#                    {'Chicken': 2,
+#                     'Cow': 1}
+#                }
+#            }
+data = {'Mar-to-Market':
+			{'Full Protection ('+(str)(xDays_FP)+')':
+				 {'SPXT': xSPXT_FP,
+				  'SI': xSI_FP},
+			 'No/Partial Protection ('+(str)(xDays_NP)+')':
+				 {'SPXT': xSPXT_NP,
+				  'SI': xSI_NP},
+			 'Upside Gain ('+(str)(xDays_UG)+')':
+				 {'SPXT': xSPXT_UG,
+				  'SI': xSI_UG},
+			 'Overall Average ('+(str)(xDays_all)+')':
+				 {'SPXT': xSPXT_all,
+				  'SI': xSI_all}
+			 },
+		'On Expiration Date':
+			{'SPXT': xSPXT_exp,
+			 'SI': xSI_exp}
+		}
+fig = plt.figure()
+ax = fig.add_subplot(1,1,1)
+label_group_bar(ax, data)
+fig.subplots_adjust(bottom=0.3)
+fig.savefig(xDir + 'xStressTestBarChart_' + (str)(xTerm) + '.png')
+fig.show()
+
+
+
+#############################

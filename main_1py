@@ -1,0 +1,1157 @@
+### Portfolio Optiimization
+### Sean Welleck | 2014
+#
+# Finds an optimal allocation of stocks in a portfolio,
+# satisfying a minimum expected return.
+# The problem is posed as a Quadratic Program, and solved
+# using the cvxopt library.
+# Uses actual past stock data, obtained using the stocks module.
+import math
+import numpy as np
+import pandas as pd
+import datetime
+import cvxopt
+from cvxopt import matrix, solvers
+import matplotlib.pyplot as plt
+##########################
+import warnings
+warnings.filterwarnings('ignore')
+warnings.warn('DelftStack')
+warnings.warn('Do not show this message')
+#####################
+solvers.options['show_progress'] = False        # !!!
+
+pd.set_option('display.max_rows', 500)
+pd.set_option('display.max_columns', 500)
+pd.set_option('display.width', 1000)
+
+#from cvxopt import solvers
+#import stocks
+import numpy as np
+import pandas as pd
+import datetime
+
+import pandas as pd
+import statsmodels.formula.api as smf
+import statsmodels.api as sm
+
+# c = cvxopt.matrix([0, -1], tc='d')
+# print('c: ', c)
+# c = numpy.matrix(c)
+# print('c: ', c)
+#
+# c = cvxopt.matrix([0, -1])
+# print('c: ', c)
+# G = cvxopt.matrix([[-1, 1], [3, 2], [2, 3], [-1, 0], [0, -1]], tc='d')
+# print('G: ', G)
+##################
+xDir = r'D:\\Users\\ggu\\Documents\\GU\\MultiRiskFactorModel\\DATA\\'
+xSPXT = pd.read_csv(xDir + 'xSPXT.txt')
+xSPXT['DATE'] = pd.to_datetime(xSPXT['DATE'], format='%m/%d/%Y')
+xBondTR = pd.read_csv(xDir + 'xBondTR.txt')
+xBondTR['DATE'] = pd.to_datetime(xBondTR['DATE'], format='%m/%d/%Y')
+#xBondTR.rename(columns={'LBUSTRUU': 'BondTR'},inplace=True)
+xAAPL = pd.read_csv(xDir + 'xAAPL.txt')
+xAAPL['DATE'] = pd.to_datetime(xAAPL['DATE'], format='%m/%d/%Y')
+xAGG = pd.read_csv(xDir + 'xAGG.txt')
+xAGG['DATE'] = pd.to_datetime(xAGG['DATE'], format='%m/%d/%Y')
+xCCY = pd.read_csv(xDir + 'xCCY.txt')
+xCCY['DATE'] = pd.to_datetime(xCCY['DATE'], format='%m/%d/%Y')
+xCOMM = pd.read_csv(xDir + 'xCOMM.txt')
+xCOMM['DATE'] = pd.to_datetime(xCOMM['DATE'], format='%m/%d/%Y')
+xCREDIT = pd.read_csv(xDir + 'xCREDIT.txt')
+xCREDIT['DATE'] = pd.to_datetime(xCREDIT['DATE'], format='%m/%d/%Y')
+xFTLS = pd.read_csv(xDir + 'xFTLS.txt')
+xFTLS['DATE'] = pd.to_datetime(xFTLS['DATE'], format='%m/%d/%Y')
+xHFRIEMNI = pd.read_csv(xDir + 'xHFRIEMNI.txt')
+xHFRIEMNI['DATE'] = pd.to_datetime(xHFRIEMNI['DATE'], format='%m/%d/%Y')
+xPRBAX = pd.read_csv(xDir + 'xPRBAX.txt')
+xPRBAX['DATE'] = pd.to_datetime(xPRBAX['DATE'], format='%m/%d/%Y')
+xPRWAX = pd.read_csv(xDir + 'xPRWAX.txt')
+xPRWAX['DATE'] = pd.to_datetime(xPRWAX['DATE'], format='%m/%d/%Y')
+xSPLPEQTY = pd.read_csv(xDir + 'xSPLPEQTY.txt')
+xSPLPEQTY['DATE'] = pd.to_datetime(xSPLPEQTY['DATE'], format='%m/%d/%Y')
+xSPX = pd.read_csv(xDir + 'xSPX.txt')
+xSPX['DATE'] = pd.to_datetime(xSPX['DATE'], format='%m/%d/%Y')
+xSPY = pd.read_csv(xDir + 'xSPY.txt')
+xSPY['DATE'] = pd.to_datetime(xSPY['DATE'], format='%m/%d/%Y')
+xTSLA = pd.read_csv(xDir + 'xTSLA.txt')
+xTSLA['DATE'] = pd.to_datetime(xTSLA['DATE'], format='%m/%d/%Y')
+xUS3M = pd.read_csv(xDir + 'xUS3M.txt')
+xUS3M['DATE'] = pd.to_datetime(xUS3M['DATE'], format='%m/%d/%Y')
+xUS10Y = pd.read_csv(xDir + 'xUS10Y.txt')
+xUS10Y['DATE'] = pd.to_datetime(xUS10Y['DATE'], format='%m/%d/%Y')
+xHYG = pd.read_csv(xDir + 'xHYG.txt')
+xHYG['DATE'] = pd.to_datetime(xHYG['DATE'], format='%m/%d/%Y')
+xCPI = pd.read_csv(xDir + 'xCPI.txt')
+xCPI['DATE'] = pd.to_datetime(xCPI['DATE'], format='%m/%d/%Y')
+xHYTR = pd.read_csv(xDir + 'xLF98TRUU.txt')
+xHYTR['DATE'] = pd.to_datetime(xHYTR['DATE'], format='%m/%d/%Y')
+xTIPS = pd.read_csv(xDir + 'xLBUTTRUU.txt')
+xTIPS['DATE'] = pd.to_datetime(xTIPS['DATE'], format='%m/%d/%Y')
+xGMWAX = pd.read_csv(xDir + 'xGMWAX.txt')
+xGMWAX['DATE'] = pd.to_datetime(xGMWAX['DATE'], format='%m/%d/%Y')
+xCashConst = pd.read_csv(xDir + 'xCashConst.txt')
+xCashConst['DATE'] = pd.to_datetime(xCashConst['DATE'], format='%m/%d/%Y')
+xS5INFT = pd.read_csv(xDir + 'xS5INFT.txt')
+xS5INFT['DATE'] = pd.to_datetime(xS5INFT['DATE'], format='%m/%d/%Y')
+x7030TR = pd.read_csv(xDir + 'x7030TR.txt')
+x7030TR['DATE'] = pd.to_datetime(x7030TR['DATE'], format='%m/%d/%Y')
+xUSCredit = pd.read_csv(xDir + 'xLUCRTRUU.txt')
+xUSCredit['DATE'] = pd.to_datetime(xUSCredit['DATE'], format='%m/%d/%Y')
+xSHY = pd.read_csv(xDir + 'xSHY.txt')
+xSHY['DATE'] = pd.to_datetime(xSHY['DATE'], format='%m/%d/%Y')
+xTIP = pd.read_csv(xDir + 'xTIP.txt')
+xTIP['DATE'] = pd.to_datetime(xTIP['DATE'], format='%m/%d/%Y')
+xAMZN = pd.read_csv(xDir + 'xAMZN.txt')
+xAMZN['DATE'] = pd.to_datetime(xAMZN['DATE'], format='%m/%d/%Y')
+xFB = pd.read_csv(xDir + 'xFB.txt')
+xFB['DATE'] = pd.to_datetime(xFB['DATE'], format='%m/%d/%Y')
+xVIAC = pd.read_csv(xDir + 'xVIAC.txt')
+xVIAC['DATE'] = pd.to_datetime(xVIAC['DATE'], format='%m/%d/%Y')
+xGOOG = pd.read_csv(xDir + 'xGOOG.txt')
+xGOOG['DATE'] = pd.to_datetime(xGOOG['DATE'], format='%m/%d/%Y')
+xLQD = pd.read_csv(xDir + 'xLQD.txt')
+xLQD['DATE'] = pd.to_datetime(xLQD['DATE'], format='%m/%d/%Y')
+xMDY = pd.read_csv(xDir + 'xMDY.txt')
+xMDY['DATE'] = pd.to_datetime(xMDY['DATE'], format='%m/%d/%Y')
+xMSFT = pd.read_csv(xDir + 'xMSFT.txt')
+xMSFT['DATE'] = pd.to_datetime(xMSFT['DATE'], format='%m/%d/%Y')
+xRLV = pd.read_csv(xDir + 'xRLV.txt')
+xRLV['DATE'] = pd.to_datetime(xRLV['DATE'], format='%m/%d/%Y')
+xRLG = pd.read_csv(xDir + 'xRLG.txt')
+xRLG['DATE'] = pd.to_datetime(xRLG['DATE'], format='%m/%d/%Y')
+xRIY = pd.read_csv(xDir + 'xRIY.txt')
+xRIY['DATE'] = pd.to_datetime(xRIY['DATE'], format='%m/%d/%Y')
+xRMV = pd.read_csv(xDir + 'xRMV.txt')
+xRMV['DATE'] = pd.to_datetime(xRMV['DATE'], format='%m/%d/%Y')
+xRMC = pd.read_csv(xDir + 'xRMC.txt')
+xRMC['DATE'] = pd.to_datetime(xRMC['DATE'], format='%m/%d/%Y')
+xRDG = pd.read_csv(xDir + 'xRDG.txt')
+xRDG['DATE'] = pd.to_datetime(xRDG['DATE'], format='%m/%d/%Y')
+xRUJ = pd.read_csv(xDir + 'xRUJ.txt')
+xRUJ['DATE'] = pd.to_datetime(xRUJ['DATE'], format='%m/%d/%Y')
+xRTY = pd.read_csv(xDir + 'xRTY.txt')
+xRTY['DATE'] = pd.to_datetime(xRTY['DATE'], format='%m/%d/%Y')
+xRUO = pd.read_csv(xDir + 'xRUO.txt')
+xRUO['DATE'] = pd.to_datetime(xRUO['DATE'], format='%m/%d/%Y')
+xSCHP = pd.read_csv(xDir + 'xSCHP.txt')
+xSCHP['DATE'] = pd.to_datetime(xSCHP['DATE'], format='%m/%d/%Y')
+xIEF = pd.read_csv(xDir + 'xIEF.txt')
+xIEF['DATE'] = pd.to_datetime(xIEF['DATE'], format='%m/%d/%Y')
+xMUB = pd.read_csv(xDir + 'xMUB.txt')
+xMUB['DATE'] = pd.to_datetime(xMUB['DATE'], format='%m/%d/%Y')
+xSH = pd.read_csv(xDir + 'xSH.txt')
+xSH['DATE'] = pd.to_datetime(xSH['DATE'], format='%m/%d/%Y')
+xSSO = pd.read_csv(xDir + 'xSSO.txt')
+xSSO['DATE'] = pd.to_datetime(xSSO['DATE'], format='%m/%d/%Y')
+xTREASURY = pd.read_csv(xDir + 'xLUATTRUU.txt')
+xTREASURY['DATE'] = pd.to_datetime(xTREASURY['DATE'], format='%m/%d/%Y')
+
+##########################################
+xDF = xSPX.copy()
+xDF = pd.merge(xDF, xSPXT, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xBondTR, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xAAPL, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xAGG, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xCCY, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xCOMM, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xCREDIT, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xFTLS, on=['DATE'], how='left')
+###xDF = pd.merge(xDF, xHFRIEMNI, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xPRBAX, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xPRWAX, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xSPLPEQTY, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xSPY, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xTSLA, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xUS3M, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xUS10Y, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xHYG, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xHYTR, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xTIPS, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xGMWAX, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xCashConst, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xS5INFT, on=['DATE'], how='left')
+xDF = pd.merge(xDF, x7030TR, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xUSCredit, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xSHY, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xTIP, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xAMZN, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xFB, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xVIAC, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xGOOG, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xLQD, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xMDY, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xMSFT, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xRLV, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xRLG, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xRIY, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xRMV, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xRMC, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xRDG, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xRUJ, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xRTY, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xRUO, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xSCHP, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xIEF, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xMUB, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xSH, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xSSO, on=['DATE'], how='left')
+xDF = pd.merge(xDF, xTREASURY, on=['DATE'], how='left')
+
+#####################################################################
+# xEndDate_0 = pd.to_datetime('10/1/2018')
+# xDF = xDF.loc[xDF['DATE']<xEndDate_0]
+# ################ forward fill the missing equity trading dates ############
+xDF['BondTR'].fillna(method='ffill', inplace=True)
+xDF['HYTR'].fillna(method='ffill', inplace=True)
+xDF['TIPS'].fillna(method='ffill', inplace=True)
+xDF['LQD'].fillna(method='ffill', inplace=True)
+xDF['SPLPEQTY'].fillna(method='ffill', inplace=True)
+#################################
+################Calculating SI returns here ##################################
+for k in range(1,4):
+    if k==1:
+        # 2 year, buffer -10%, x1.5, cap = 21%, hard buffer note!
+        xCap = 0.21 #0.21 #0.21  #1000 #0.21   #1000  #0.21
+        xBuffer = -0.10000  ####-0.10  #-0.25   #-0.30   #-0.25
+        xTerm = 2  #2  #4  #6   #4 #2  #3 # years
+        xAmount = 100
+        xLever = 1.500  #1.5  #1.15
+        xBufferType = "H"  #"T"  # "H" for regular Buffer; "G" for Geared Buffer (or Barrier); "T" for Trigger Buffer!
+    elif k == 2:
+        # 4 years, buffer -25%, no leverage and no cap, barrier buffer note!
+        xCap = 10000
+        xBuffer = -0.250000
+        xTerm = 4
+        xAmount = 100
+        xLever = 1.00
+        xBufferType = "T"
+    elif k==3:
+        # 6 years, buffer -30%, x1.15 leverage and no cap, barrier buffer note!
+        xCap = 10000  # 0.21 #0.21  #1000 #0.21   #1000  #0.21
+        xBuffer = -0.300000  ####-0.10  #-0.25   #-0.30   #-0.25
+        xTerm = 6
+        xAmount = 100
+        xLever = 1.1500  # 1.5  #1.15
+        xBufferType = "T"  # "T"  # "H" for regular Buffer; "G" for Geared Buffer (or Barrier); "T" for Trigger Buffer!
+
+    xDF['SPX_rtn_term'] = xDF['SPX'].pct_change(xTerm*252)
+    xDF.loc[xDF['SPX_rtn_term'] > 0, 'SI' + (str)(xTerm) + '_rtn_term'] = xDF['SPX_rtn_term'] * xLever
+    xDF.loc[xDF['SPX_rtn_term']* xLever > xCap, 'SI' + (str)(xTerm) + '_rtn_term'] = xCap
+    xDF.loc[(xDF['SPX_rtn_term']<=0) & (xDF['SPX_rtn_term']>=xBuffer), 'SI'+(str)(xTerm)+'_rtn_term'] = 0
+    if (xBufferType=='H'):
+        xDF.loc[(xDF['SPX_rtn_term']<xBuffer),'SI'+(str)(xTerm)+'_rtn_term'] = xDF['SPX_rtn_term'] - xBuffer
+    elif (xBufferType=='T'):
+        xDF.loc[(xDF['SPX_rtn_term']<xBuffer),'SI'+(str)(xTerm)+'_rtn_term'] = xDF['SPX_rtn_term']
+    elif (xBufferType=='G'):
+        xK = 1 / (1+xBuffer)
+        xDF.loc[(xDF['SPX_rtn_term']<xBuffer),'SI'+(str)(xTerm)+'_rtn_term'] = xK * (xDF['SPX_rtn_term'] - xBuffer)
+
+    #xDF['SI'+(str)(xTerm)+'_pct_ch_Y'] = (1+xDF['SI'+(str)(xTerm)+'_rtn_term'])**(1/xTerm) - 1
+    #xDF['SI'+(str)(xTerm)+'_pct_ch_Q'] = (1+xDF['SI'+(str)(xTerm)+'_rtn_term'])**(1/(xTerm*4)) - 1
+    xDF['SI'+(str)(xTerm)+'_pct_ch_M'] = (1+xDF['SI'+(str)(xTerm)+'_rtn_term'])**(1/xTerm) - 1  #(1+xDF['SI'+(str)(xTerm)+'_rtn_term'])**(1/(xTerm*12)) - 1
+    #xDF['SI'+(str)(xTerm)+'_pct_ch_D'] = (1+xDF['SI'+(str)(xTerm)+'_rtn_term'])**(1/(xTerm*252)) - 1
+
+###########################
+#########################################
+xSPX_2 = xSPX.copy()
+xSPX_2['month']=xSPX_2.DATE.dt.month
+xSPX_2['year']=xSPX_2.DATE.dt.year
+xSPX_2['diff']=xSPX_2.month.diff(-1)
+xSPX_2['month-year']=xSPX_2.month.astype('string')+'-'+xSPX_2.year.astype('string')
+xSPX_2 = xSPX_2.loc[xSPX_2['diff']!=0]
+##### equity market neutral index (monthly) ######
+xHFRIEMNI['month']=xHFRIEMNI.DATE.dt.month
+xHFRIEMNI['year']=xHFRIEMNI.DATE.dt.year
+###xHFRIEMNI['diff']=xHFRIEMNI.month.diff(-1)
+xHFRIEMNI['month-year']=xHFRIEMNI.month.astype('string')+'-'+xHFRIEMNI.year.astype('string')
+xHFRIEMNI.rename(columns={'DATE': 'DATE0'},inplace=True)
+#xHFRIEMNI['LS_1y_pct_ch']=xHFRIEMNI['HFRIEMNI'].pct_change(12)
+xHFRIEMNI = pd.merge(xHFRIEMNI, xSPX_2[['DATE','month-year']], on=['month-year'],how='left')
+xDF = pd.merge(xDF, xHFRIEMNI[['DATE','HFRIEMNI']], on=['DATE'], how='left')
+##### CPI index (monthly) ######
+xCPI['month']=xCPI.DATE.dt.month
+xCPI['year']=xCPI.DATE.dt.year
+xCPI['month-year']=xCPI.month.astype('string')+'-'+xCPI.year.astype('string')
+xCPI.rename(columns={'DATE': 'DATE0'},inplace=True)
+#xCPI['LS_1y_pct_ch']=xCPI['HFRIEMNI'].pct_change(12)
+xCPI = pd.merge(xCPI, xSPX_2[['DATE','month-year']], on=['month-year'],how='left')
+xDF = pd.merge(xDF, xCPI[['DATE','CPI']], on=['DATE'], how='left')
+###########
+xDF = pd.merge(xDF, xSPX_2[['DATE','month-year','diff']], on=['DATE'], how='left')
+xDF_M = xDF.loc[xDF['diff']!=0]
+xDF_M = xDF_M.loc[xDF_M['diff'].notnull()]
+xDF_M.reset_index(drop=True, inplace=True)
+xDF_M['RealBondTR'] = xDF_M['BondTR']/xDF_M['CPI']
+xDF_M['quarter'] = xDF_M['DATE'].dt.quarter
+xDF_M['diff_Q']=xDF_M.quarter.diff(-1)
+######################################################
+
+#########################################
+xDF['SPXT_pct_ch_D']=xDF['SPXT'].pct_change()
+xDF['BondTR_pct_ch_D']=xDF['BondTR'].pct_change()
+# #########################
+
+############### new portfolio #########
+################
+xY_col = 'SPLPEQTY'
+xY_col = 'FTLS'
+xY_col = 'CashConst'
+xY_col = 'PRWAX'
+xY_col = 'GMWAX'
+xY_col = 'PRBAX'
+xY_col = 'SI'
+xY_col = '7030TR'
+
+xY_col = 'SPY'
+xY_col = 'SHY'
+xY_col = 'TIP'
+xY_col = 'AGG'
+xY_col = 'HYG'
+xY_col = 'TSLA'
+xY_col = 'AAPL'
+
+xCoef_table = pd.DataFrame()
+xRiskExp_Current = pd.DataFrame()
+xRiskConcentration_Current = pd.DataFrame()
+xCoefxStdDev = pd.DataFrame()
+xStdDev_indep_table=pd.DataFrame()
+##################
+xW1=0.75
+xW2=0.25
+xW3=0.0  #0.10
+#xW4=0.15
+#xDF['NewPort_pct_ch_D'] =xW1* xDF[xY_col + '_pct_ch_D'] + xW2*xDF['BondTR_pct_ch_D']
+#xDF['NewPort_pct_ch_D'] =xW1* xDF[xY_col + '_pct_ch_D'] + xW2*xDF['TIPS_pct_ch_D']
+#xDF['NewPort_pct_ch_D'] =xW1* xDF[xY_col + '_pct_ch_D'] + xW2*xDF['BondTR_pct_ch_D']+ xW3*xDF['SI2_pct_ch_D']
+#xDF['NewPort_pct_ch_D'] =xW1* xDF[xY_col + '_pct_ch_D'] + xW2*xDF['BondTR_pct_ch_D']+ xW3*xDF['SI2_pct_ch_D']
+#xDF['NewPort_pct_ch_D'] =xW1* xDF[xY_col + '_pct_ch_D'] + xW2*xDF['SPXT_pct_ch_D']+ xW3*xDF['SI2_pct_ch_D']
+#xDF['NewPort_pct_ch_D'] =xW1* xDF[xY_col + '_pct_ch_D'] + xW2*xDF['SI2_pct_ch_D']+ xW3*xDF['TIPS_pct_ch_D']+ xW4*xDF['HYTR_pct_ch_D']
+
+#xDF['NewPort'] = (1+xDF['NewPort_pct_ch_D']).cumprod()
+
+############################
+#xDF_M = pd.merge(xDF_M,xDF[['DATE','NewPort']],on=['DATE'],how='left')
+######################
+xCols_pct = xDF.columns[xDF.columns.str.contains(pat = '_pct_ch')]
+
+xDF2=xDF[xCols_pct].copy()
+
+xCorrelations = xDF2.corr()
+xStdDev=xDF2.std()
+xMean = xDF2.mean()
+xCorrelations.to_csv(xDir+'xCorrelations.txt')
+xStdDev.to_csv(xDir+'xStdDev.txt')
+xMean.to_csv(xDir+'xMean.txt')
+########### model portfolios #########
+CONS_E=0.2
+MODCONS_E=0.4
+MOD_E=0.6
+MODGROW_E=0.75
+GROW_E=0.9
+MAXGROW_E=0.98
+
+#xMP=xDF[['DATE','SPXT','SPXT_pct_ch_D','SPXT_pct_ch_Y','BondTR','BondTR_pct_ch_D','BondTR_pct_ch_Y']].copy()
+#xMP=xDF[['DATE','SPXT_pct_ch_D','BondTR_pct_ch_D',xY_col+'_pct_ch_D','NewPort_pct_ch_D','NewPort_pct_ch_Y']].copy()
+xMP=xDF[['DATE','SPXT_pct_ch_D','BondTR_pct_ch_D']].copy()
+xMP.rename(columns={xY_col+'_pct_ch_D':'Current_pct_ch_D','NewPort_pct_ch_D':'New_pct_ch_D'},inplace=True)
+xMP['CONS_pct_ch_D']=CONS_E*xMP['SPXT_pct_ch_D']+(1-CONS_E)*xMP['BondTR_pct_ch_D']     #daily rebalanced as benchmark index
+xMP['MODCONS_pct_ch_D']=MODCONS_E*xMP['SPXT_pct_ch_D']+(1-MODCONS_E)*xMP['BondTR_pct_ch_D']     #daily rebalanced as benchmark index
+xMP['MOD_pct_ch_D']=MOD_E*xMP['SPXT_pct_ch_D']+(1-MOD_E)*xMP['BondTR_pct_ch_D']     #daily rebalanced as benchmark index
+xMP['MODGROW_pct_ch_D']=MODGROW_E*xMP['SPXT_pct_ch_D']+(1-MODGROW_E)*xMP['BondTR_pct_ch_D']     #daily rebalanced as benchmark index
+xMP['GROW_pct_ch_D']=GROW_E*xMP['SPXT_pct_ch_D']+(1-GROW_E)*xMP['BondTR_pct_ch_D']     #daily rebalanced as benchmark index
+xMP['MAXGROW_pct_ch_D']=MAXGROW_E*xMP['SPXT_pct_ch_D']+(1-MAXGROW_E)*xMP['BondTR_pct_ch_D']     #daily rebalanced as benchmark index
+
+xMP['CONS_port']=(1 + xMP['CONS_pct_ch_D']).cumprod()
+xMP['MODCONS_port']=(1 + xMP['MODCONS_pct_ch_D']).cumprod()
+xMP['MOD_port']=(1 + xMP['MOD_pct_ch_D']).cumprod()
+xMP['MODGROW_port']=(1 + xMP['MODGROW_pct_ch_D']).cumprod()
+xMP['GROW_port']=(1 + xMP['GROW_pct_ch_D']).cumprod()
+xMP['MAXGROW_port']=(1 + xMP['MAXGROW_pct_ch_D']).cumprod()
+#xMP['Current_port']=(1 + xMP['Current_pct_ch_D']).cumprod()
+#xMP['New_port']=(1 + xMP['New_pct_ch_D']).cumprod()
+
+#
+# xMP['New_pct_ch_Y']=xMP['NewPort_pct_ch_Y']
+############################
+xMP_MQ = xDF_M[['DATE']].copy()
+# xMP_MQ = pd.merge(xMP_MQ, xMP[['DATE','CONS_port','MODCONS_port','MOD_port','MODGROW_port','GROW_port','MAXGROW_port',
+#                                'Current_port','New_port']],on=['DATE'],how='left')
+xMP_MQ = pd.merge(xMP_MQ, xMP[['DATE','CONS_port','MODCONS_port','MOD_port','MODGROW_port','GROW_port','MAXGROW_port'
+                               ]],on=['DATE'],how='left')
+xMP_MQ['CONS_pct_ch_M']=xMP_MQ['CONS_port'].pct_change()
+xMP_MQ['MODCONS_pct_ch_M']=xMP_MQ['MODCONS_port'].pct_change()
+xMP_MQ['MOD_pct_ch_M']=xMP_MQ['MOD_port'].pct_change()
+xMP_MQ['MODGROW_pct_ch_M']=xMP_MQ['MODGROW_port'].pct_change()
+xMP_MQ['GROW_pct_ch_M']=xMP_MQ['GROW_port'].pct_change()
+xMP_MQ['MAXGROW_pct_ch_M']=xMP_MQ['MAXGROW_port'].pct_change()
+#xMP_MQ['Current_pct_ch_M']=xMP_MQ['Current_port'].pct_change()
+#xMP_MQ['New_pct_ch_M']=xMP_MQ['New_port'].pct_change()
+
+
+############################
+xCols_pct_MP = xMP.columns[xMP.columns.str.contains(pat = '_pct_ch_M')]
+xMP2=xMP[xCols_pct_MP].copy()
+xAnnRtn_MP_Y=xMP2.mean()
+xStdDev_MP_Y=xMP2.std()
+xStdDev_MP_Y.to_csv(xDir+'xStdDev_MP_M.txt')
+xAnnRtn_MP_Y.to_csv(xDir+'xAnnRtn_MP_M.txt')
+#################
+# xCols_pct_MP = xMP.columns[xMP.columns.str.contains(pat = '_pct_ch_D')]
+# xMP2=xMP[xCols_pct_MP].copy()
+# xAnnRtn_MP_D=xMP2.mean() * 252 ####  try to annualized compounded annual return
+# xStdDev_MP_D=xMP2.std() * np.sqrt(252)
+# xStdDev_MP_D.to_csv(xDir+'xStdDev_MP_D.txt')
+# xAnnRtn_MP_D.to_csv(xDir+'xAnnRtn_MP_D.txt')
+
+#xStdDev_MP[0] is the std dev of the conservative model portfolio
+#xStdDev_MP[5] is the std dev of the MAX Growth model portfolio
+# std dev > xStdDev_MP[5] is ACCESSIVE GROWTH portfolio!!!!
+################### MONTHLY #################
+##################################################
+xDF_M['SPXT_pct_ch_M']=xDF_M['SPXT'].pct_change()
+xDF_M['BondTR_pct_ch_M']=xDF_M['BondTR'].pct_change()
+xDF_M['AAPL_pct_ch_M']=xDF_M['AAPL'].pct_change()
+xDF_M['MSFT_pct_ch_M']=xDF_M['MSFT'].pct_change()
+xDF_M['AMZN_pct_ch_M']=xDF_M['AMZN'].pct_change()
+xDF_M['FB_pct_ch_M']=xDF_M['FB'].pct_change()
+xDF_M['AGG_pct_ch_M']=xDF_M['AGG'].pct_change()
+xDF_M['CCY_pct_ch_M']=xDF_M['CCY'].pct_change()
+xDF_M['COMM_pct_ch_M']=xDF_M['COMM'].pct_change()
+xDF_M['CREDIT_pct_ch_M']=xDF_M['CREDIT'].pct_change()
+xDF_M['FTLS_pct_ch_M']=xDF_M['FTLS'].pct_change()
+xDF_M['HFRIEMNI_pct_ch_M']=xDF_M['HFRIEMNI'].pct_change()
+xDF_M['PRBAX_pct_ch_M']=xDF_M['PRBAX'].pct_change()
+xDF_M['PRWAX_pct_ch_M']=xDF_M['PRWAX'].pct_change()
+xDF_M['SPLPEQTY_pct_ch_M']=xDF_M['SPLPEQTY'].pct_change()
+xDF_M['SPX_pct_ch_M']=xDF_M['SPX'].pct_change()
+xDF_M['SPY_pct_ch_M']=xDF_M['SPY'].pct_change()
+xDF_M['TSLA_pct_ch_M']=xDF_M['TSLA'].pct_change()
+xDF_M['US3M_pct_ch_M']=xDF_M['US3M'].pct_change()
+xDF_M['US10Y_pct_ch_M']=xDF_M['US10Y'].pct_change()
+xDF_M['HYG_pct_ch_M']=xDF_M['HYG'].pct_change()
+xDF_M['HYTR_pct_ch_M']=xDF_M['HYTR'].pct_change()
+xDF_M['RealBondTR_pct_ch_M']=xDF_M['RealBondTR'].pct_change()
+xDF_M['CPI_pct_ch_M']=xDF_M['CPI'].pct_change()
+xDF_M['CPI_pct_ch_Y']=xDF_M['CPI'].pct_change(12)
+xDF_M['TIPS_pct_ch_M']=xDF_M['TIPS'].pct_change()
+xDF_M['GMWAX_pct_ch_M']=xDF_M['GMWAX'].pct_change()
+xDF_M['CashConst_pct_ch_M']=xDF_M['CashConst'].pct_change()
+xDF_M['S5INFT_pct_ch_M']=xDF_M['S5INFT'].pct_change()
+xDF_M['7030TR_pct_ch_M']=xDF_M['7030TR'].pct_change()
+xDF_M['USCredit_pct_ch_M']=xDF_M['USCredit'].pct_change()
+xDF_M['SHY_pct_ch_M']=xDF_M['SHY'].pct_change()
+xDF_M['TIP_pct_ch_M']=xDF_M['TIP'].pct_change()
+xDF_M['GOOG_pct_ch_M']=xDF_M['GOOG'].pct_change()
+xDF_M['VIAC_pct_ch_M']=xDF_M['VIAC'].pct_change()
+xDF_M['LQD_pct_ch_M']=xDF_M['LQD'].pct_change()
+xDF_M['MDY_pct_ch_M']=xDF_M['MDY'].pct_change()
+xDF_M['RLV_pct_ch_M']=xDF_M['RLV'].pct_change()
+xDF_M['RIY_pct_ch_M']=xDF_M['RIY'].pct_change()
+xDF_M['RLG_pct_ch_M']=xDF_M['RLG'].pct_change()
+xDF_M['RMV_pct_ch_M']=xDF_M['RMV'].pct_change()
+xDF_M['RMC_pct_ch_M']=xDF_M['RMC'].pct_change()
+xDF_M['RDG_pct_ch_M']=xDF_M['RDG'].pct_change()
+xDF_M['RUJ_pct_ch_M']=xDF_M['RUJ'].pct_change()
+xDF_M['RTY_pct_ch_M']=xDF_M['RTY'].pct_change()
+xDF_M['RUO_pct_ch_M']=xDF_M['RUO'].pct_change()
+xDF_M['SCHP_pct_ch_M']=xDF_M['SCHP'].pct_change()
+xDF_M['IEF_pct_ch_M']=xDF_M['IEF'].pct_change()
+xDF_M['MUB_pct_ch_M']=xDF_M['MUB'].pct_change()
+xDF_M['SH_pct_ch_M']=xDF_M['SH'].pct_change()
+xDF_M['SSO_pct_ch_M']=xDF_M['SSO'].pct_change()
+xDF_M['TREASURY_pct_ch_M']=xDF_M['TREASURY'].pct_change()
+
+#xDF_M['Inflation_pct_ch_M'] = xDF_M['BondTR_pct_ch_M'] - xDF_M['TIPS_pct_ch_M']
+
+############### overwrite to create the EXACT 70/30 returns #############
+xDF_M['7030TR_pct_ch_M']=0.7*xDF_M['SPXT_pct_ch_M']+0.3*xDF_M['BondTR_pct_ch_M']
+xDF_M['3070TR_pct_ch_M']=0.3*xDF_M['SPXT_pct_ch_M']+0.7*xDF_M['BondTR_pct_ch_M']
+xDF_M['30AAPL30MSFT20AMZN20GOOGTR_pct_ch_M']= 0.3 * xDF_M['AAPL_pct_ch_M'] + 0.3*xDF_M['MSFT_pct_ch_M'] \
+                                              + 0.2*xDF_M['AMZN_pct_ch_M'] + 0.2*xDF_M['GOOG_pct_ch_M']
+xDF_M['30SPY30MDY20AGG20LQDTR_pct_ch_M']= 0.3 * xDF_M['SPY_pct_ch_M'] + 0.3*xDF_M['MDY_pct_ch_M'] \
+                                              + 0.2*xDF_M['AGG_pct_ch_M'] + 0.2*xDF_M['LQD_pct_ch_M']
+#############################################
+
+######## OLS HERE MONTHLY ###############
+# xCols_pct_ch_M= xDF_M.columns[xDF_M.columns.str.contains(pat = '_pct_ch_M')]
+# xCols_pct_ch_M=xCols_pct_ch_M.insert(0,'DATE')
+
+# xRiskFactorSet_M=['SPXT_pct_ch_M','BondTR_pct_ch_M','CCY_pct_ch_M','COMM_pct_ch_M','USCredit_pct_ch_M','HYTR_pct_ch_M',
+#                   'TIPS_pct_ch_M','Inflation_pct_ch_M']   #'CPI_pct_ch_M','RealBondTR_pct_ch_M'
+
+xRiskFactorSet_M=['SPXT_pct_ch_M','USCredit_pct_ch_M','TREASURY_pct_ch_M','COMM_pct_ch_M']   #'CPI_pct_ch_M','RealBondTR_pct_ch_M'
+#xRiskFactorSet_M=['SPXT_pct_ch_M','USCredit_pct_ch_M','TIPS_pct_ch_M','COMM_pct_ch_M','HYTR_pct_ch_M']   #'CPI_pct_ch_M','RealBondTR_pct_ch_M'
+
+################## derive orthogonal risk factors ##################
+xDF_orthog = xDF_M[['DATE']+xRiskFactorSet_M]
+xDF_orthog.dropna(inplace=True)
+xDF_orthog.reset_index(drop=True,inplace=True)
+## (1) derive orthog_SPXT #####
+Y = xDF_orthog['USCredit_pct_ch_M']# xDF_orthog['SPXT_pct_ch_M']
+X = xDF_orthog['TREASURY_pct_ch_M'] #xDF_orthog['TIPS_pct_ch_M']
+X = sm.add_constant(X)
+model = sm.OLS(Y, X)
+result = model.fit()
+xDF_orthog['orthog_USCredit_pct_ch_M'] = result.params[0] + result.resid
+
+## (2) derive orthog_USCredit #####
+Y = xDF_orthog['SPXT_pct_ch_M'] #xDF_orthog['USCredit_pct_ch_M']
+X = xDF_orthog[['orthog_USCredit_pct_ch_M','TREASURY_pct_ch_M']] #xDF_orthog[['SPXT_pct_ch_M','TIPS_pct_ch_M']]
+X = sm.add_constant(X)
+model = sm.OLS(Y, X)
+result = model.fit()
+xDF_orthog['orthog_SPXT_pct_ch_M'] = result.params[0] + result.resid
+
+## (3) derive orthog_COMM #####
+Y = xDF_orthog['COMM_pct_ch_M']
+X = xDF_orthog[['orthog_USCredit_pct_ch_M','orthog_SPXT_pct_ch_M','TREASURY_pct_ch_M']] #xDF_orthog[['SPXT_pct_ch_M','TIPS_pct_ch_M','USCredit_pct_ch_M']]
+X = sm.add_constant(X)
+model = sm.OLS(Y, X)
+result = model.fit()
+xDF_orthog['orthog_COMM_pct_ch_M'] = result.params[0] + result.resid
+
+#xRiskFactorCorrelations_orthog = (xDF_orthog[['orthog_SPXT_pct_ch_M','orthog_USCredit_pct_ch_M','orthog_COMM_pct_ch_M','TIPS_pct_ch_M']].corr()).round(4)
+#xRiskFactorCorrelations_raw = (xDF_orthog[['SPXT_pct_ch_M','USCredit_pct_ch_M','COMM_pct_ch_M','TIPS_pct_ch_M']].corr()).round(4)
+xRiskFactorCorrelations_orthog = (xDF_orthog[['orthog_SPXT_pct_ch_M','orthog_USCredit_pct_ch_M','orthog_COMM_pct_ch_M','TREASURY_pct_ch_M']].corr()).round(4)
+xRiskFactorCorrelations_raw = (xDF_orthog[['SPXT_pct_ch_M','USCredit_pct_ch_M','COMM_pct_ch_M','TREASURY_pct_ch_M']].corr()).round(4)
+
+xDF_M = pd.merge(xDF_M,xDF_orthog[['DATE','orthog_SPXT_pct_ch_M','orthog_USCredit_pct_ch_M','orthog_COMM_pct_ch_M']],on=['DATE'],how='left')
+##################### bring in the rolling annual returns for Model Portfolios as a benchmarks for Risk Exposures ###########
+xDF_M = pd.merge(xDF_M,xMP_MQ[['DATE','CONS_pct_ch_M','MODCONS_pct_ch_M','MOD_pct_ch_M','MODGROW_pct_ch_M','GROW_pct_ch_M','MAXGROW_pct_ch_M']],on=['DATE'],how='left')
+##########################################################################################
+xOrthogonal = 'orthog'
+#xOrthogonal = ''
+
+if xOrthogonal == 'orthog':
+    xRiskFactorSet_M = ['orthog_SPXT_pct_ch_M', 'orthog_USCredit_pct_ch_M', 'orthog_COMM_pct_ch_M', 'TREASURY_pct_ch_M']
+    #xRiskFactorSet_M = ['orthog_SPXT_pct_ch_M', 'orthog_USCredit_pct_ch_M', 'orthog_COMM_pct_ch_M', 'TIPS_pct_ch_M']
+    #xRiskFactorSet_M = ['orthog_SPXT_pct_ch_M', 'TIPS_pct_ch_M', 'orthog_COMM_pct_ch_M']
+else:
+    xOrthogonal = ''
+    xRiskFactorSet_M = ['SPXT_pct_ch_M', 'USCredit_pct_ch_M', 'TIPS_pct_ch_M',
+                        'COMM_pct_ch_M']  # 'CPI_pct_ch_M','RealBondTR_pct_ch_M'
+    #xRiskFactorSet_M = ['SPXT_pct_ch_M', 'TIPS_pct_ch_M','RealBondTR_pct_ch_M','COMM_pct_ch_M']  # 'CPI_pct_ch_M','RealBondTR_pct_ch_M'
+
+#xRiskFactorSet_M = ['orthog_SPXT_pct_ch_M','orthog_USCredit_pct_ch_M','TIPS_pct_ch_M','orthog_COMM_pct_ch_M','HYTR_pct_ch_M']
+############# in REAL terms #####################
+xDF_M['RealSPXT_pct_ch_M'] = xDF_M['SPXT_pct_ch_M'] - xDF_M['TIPS_pct_ch_M']
+xDF_M['RealUSCredit_pct_ch_M'] = xDF_M['USCredit_pct_ch_M'] - xDF_M['TIPS_pct_ch_M']
+xDF_M['RealCOMM_pct_ch_M'] = xDF_M['COMM_pct_ch_M'] - xDF_M['TIPS_pct_ch_M']
+##xRiskFactorSet_M=['RealSPXT_pct_ch_M','RealUSCredit_pct_ch_M','TIPS_pct_ch_M','RealCOMM_pct_ch_M']
+##################################
+
+xDescriptive_M=xDF_M[[xY_col+'_pct_ch_M']+xRiskFactorSet_M].describe(include='all').to_string()
+xCorrelations_M=xDF_M[[xY_col+'_pct_ch_M']+xRiskFactorSet_M].corr().to_string()
+
+xDescriptive_M = xDescriptive_M + '\n\n' + xCorrelations_M
+f = open(xDir + 'xDescriptive_M_'+xY_col+'.txt','w')
+f.write(xDescriptive_M + '\r\n')
+f.close()
+
+xDep_var = ['SPY','AGG','HYG','SHY','MSFT','AMZN','FB','GOOG','VIAC',
+            'LQD','30AAPL30MSFT20AMZN20GOOGTR','30SPY30MDY20AGG20LQDTR','TSLA',
+            '7030TR','SI2','SI4','SI6','SPLPEQTY','CONS','MODCONS',
+            'MOD','MODGROW','GROW','MAXGROW','CashConst','AAPL']
+xDep_var = ['SPY','AGG','HYG','SHY','MSFT','AMZN','FB','GOOG','VIAC',
+            'LQD','30AAPL30MSFT20AMZN20GOOGTR','30SPY30MDY20AGG20LQDTR','AAPL',
+            '7030TR','3070TR','SI2','SI4','SI6','SPLPEQTY','CONS','MODCONS',
+            'MOD','MODGROW','GROW','MAXGROW','CashConst','RLV','RIY','RMV',
+            'RMC','RDG','RUJ','RTY','RUO','TSLA']  #### 'RLG',
+
+xDep_var = ['SPY','IEF','AGG','LQD','HYG','MUB','SH','SSO','RIY','RLG',
+            'RLV','RTY','RUO','RUJ']
+#xDep_var = ['TSLA']  #### 'RLG',
+
+### xDep_var = ['RTY','RUO','AAPL']
+
+#xDep_var = ['RLV','RLG','RIY','RMV','RMC','RDG','RUJ','RTY','RUO','AAPL']
+
+#xDep_Var = [xY_col]
+
+#xRiskFactorSet_M = ['SPXT_pct_ch_M','BondTR_pct_ch_M']
+#xRiskFactorSet_M = ['RLG_pct_ch_M']
+
+xRisk_concentration_Current = pd.DataFrame()
+xRisk_concentration_New = pd.DataFrame()
+for xY_col in xDep_var:
+    xDF_M['NewPort_pct_ch_M'] = 0.75 * xDF_M[xY_col + '_pct_ch_M'] + 0.25 * xDF_M['SI4_pct_ch_M']
+    xDF_OLS_M = xDF_M[['DATE'] + xRiskFactorSet_M + [xY_col + '_pct_ch_M', 'NewPort_pct_ch_M']].copy()  #'CPI_pct_ch_M',
+    ####xDF_OLS_M=xDF[xCols_pct_ch_M].copy()
+
+    xDF_OLS_M = xDF_OLS_M.loc[xDF_OLS_M['DATE']>='2005-01-01']
+
+    xDF_OLS_M.dropna(inplace=True)
+    xDF_OLS_M.reset_index(drop=True,inplace=True)
+    ########### set up weightings for WLS here #####################
+    xDF_OLS_M['w'] = np.exp(-(-xDF_OLS_M.index+xDF_OLS_M.index.max()) / (len(xDF_OLS_M) / 5))    # exponential
+    #xDF_OLS_M['w'] = (xDF_OLS_M.index) / xDF_OLS_M.index.max()  # linear - the latest has more weights!
+    ###########################
+    xStartDate_M = xDF_OLS_M['DATE'].min()
+    xEndDate_M = xDF_OLS_M['DATE'].max()
+    #################### model portfolios for Rooling annual rate ############
+    xMP_M = xDF_OLS_M[['DATE',xY_col + '_pct_ch_M','NewPort_pct_ch_M']].copy()
+    xColumns_temp = ['DATE','CONS_pct_ch_M','MODCONS_pct_ch_M','MOD_pct_ch_M','MODGROW_pct_ch_M','GROW_pct_ch_M',
+                          'MAXGROW_pct_ch_M']
+    if (xY_col + '_pct_ch_M' in xColumns_temp):
+        xColumns_temp.remove(xY_col + '_pct_ch_M')
+    xMP_M = pd.merge(xMP_M, xMP_MQ[xColumns_temp], on=['DATE'], how='left') #,'Current_pct_ch_M','New_pct_ch_M'
+
+    xMP_M_CumRtn = (1 + xMP_M[['CONS_pct_ch_M', 'MODCONS_pct_ch_M', 'MOD_pct_ch_M', 'MODGROW_pct_ch_M', 'GROW_pct_ch_M',
+                               'MAXGROW_pct_ch_M']]).cumprod()  #, 'Current_pct_ch_M', 'New_pct_ch_M'
+    xMP_M_AnnRtn = (xMP_M_CumRtn.iloc[len(xMP_M_CumRtn) - 1] / xMP_M_CumRtn.iloc[0]) ** (
+                1 / (len(xMP_M_CumRtn) / 12)) - 1
+
+    xMP_M_AnnRtn = xMP_M_AnnRtn.reset_index()
+    xMP_M_AnnRisk = xMP_M[
+        ['CONS_pct_ch_M', 'MODCONS_pct_ch_M', 'MOD_pct_ch_M', 'MODGROW_pct_ch_M', 'GROW_pct_ch_M', 'MAXGROW_pct_ch_M'
+         ]].std().reset_index()  #'Current_pct_ch_M', 'New_pct_ch_M'
+    xMP_M_AnnRtn.rename(columns={0: 'AnnRtn'}, inplace=True)
+    xMP_M_AnnRisk.rename(columns={0: 'AnnRisk'}, inplace=True)
+    xMP_M_AnnRisk['AnnRisk'] = xMP_M_AnnRisk['AnnRisk'] * np.sqrt(12)
+
+    xMP_M_AnnRtnRisk = pd.merge(xMP_M_AnnRtn, xMP_M_AnnRisk, on=['index'], how='left')
+
+    ################ OLS ################
+    xInd_Vars = ['SPXT_pct_ch_M','BondTR_pct_ch_M','TIPS_pct_ch_M','CCY_pct_ch_M','COMM_pct_ch_M','USCredit_pct_ch_M','HYTR_pct_ch_M']
+    xInd_Vars = ['SPXT_pct_ch_M','BondTR_pct_ch_M','TIPS_pct_ch_M','CCY_pct_ch_M','USCredit_pct_ch_M']
+    xInd_Vars = ['SPXT_pct_ch_M','BondTR_pct_ch_M','TIPS_pct_ch_M','CCY_pct_ch_M','USCredit_pct_ch_M','HYTR_pct_ch_M']
+    xInd_Vars = ['SPXT_pct_ch_M','Inflation_pct_ch_M','TIPS_pct_ch_M','CCY_pct_ch_M','USCredit_pct_ch_M','HYTR_pct_ch_M']
+    xInd_Vars = ['SPXT_pct_ch_M','Inflation_pct_ch_M','TIPS_pct_ch_M','CCY_pct_ch_M','USCredit_pct_ch_M']
+    xInd_Vars = ['SPXT_pct_ch_M']
+    xInd_Vars = ['SPXT_pct_ch_M','BondTR_pct_ch_M']
+    xInd_Vars = ['SPXT_pct_ch_M','BondTR_pct_ch_M','TIPS_pct_ch_M','CCY_pct_ch_M','COMM_pct_ch_M','USCredit_pct_ch_M','HYTR_pct_ch_M']
+
+    xInd_Vars = xRiskFactorSet_M
+
+    ###xInd_Vars = ['S5INFT_pct_ch_M']
+    #xInd_Vars = ['SPXT_pct_ch_M','Inflation_pct_ch_M','TIPS_pct_ch_M','CCY_pct_ch_M','USCredit_pct_ch_M']
+    X = xDF_OLS_M[xInd_Vars]
+    ############### risk factors annual returns and std dev ##########
+    X_StdDev_M = xDF_OLS_M[xInd_Vars].std().reset_index()
+    X_Rtn_M = xDF_OLS_M[xInd_Vars].mean().reset_index()
+    ##################################################################
+    xVersion=['Current','New']
+    #xVersion=['Current']
+    xRisk_exposures_Current=pd.DataFrame()
+    xRisk_exposures_New=pd.DataFrame()
+    for x in xVersion:
+        if x=='Current':
+            Y = xDF_OLS_M[xY_col + '_pct_ch_M']
+            xY_col2 = xY_col
+            xCorrelations_M = xDF_OLS_M[[xY_col + '_pct_ch_M'] + xInd_Vars].corr().to_string()
+        elif x=='New':
+            Y = xDF_OLS_M['NewPort_pct_ch_M']
+            xY_col2 = 'New'
+            xCorrelations_M = xDF_OLS_M[[xY_col2 + 'Port_pct_ch_M'] + xInd_Vars].corr().to_string()
+        #xInd_Vars = ['SPXT_pct_ch_M','RealBondTR_pct_ch_M','TIPS_pct_ch_M','CPI_pct_ch_M','CCY_pct_ch_M','COMM_pct_ch_M','USCredit_pct_ch_M','HYTR_pct_ch_M']
+
+        #xCorrelations_M = xDF_OLS_M[[xY_col + '_pct_ch_M']+xInd_Vars].corr().to_string()
+        f = open(xDir + 'xCorrelations_M_' + xY_col + '_' + x + '.txt','w')
+        f.write(xCorrelations_M + '\r\n')
+        f.close()
+
+        X = sm.add_constant(X)
+        xStart_time = datetime.datetime.now() #time.time_ns()*1000000
+        xRegressionType ='OLS'    #'OLS' #'WLS'
+        if xRegressionType == 'OLS':
+            model = sm.OLS(Y,X)
+        elif xRegressionType == 'WLS':
+            model = sm.WLS(Y, X, weights=xDF_OLS_M['w'])
+        result = model.fit()
+        # for i in range(1,9999):
+        #     print(i)
+        xEnd_time = datetime.datetime.now() #time.time_ns()*1000000
+        globals()['xSecond_M_'+x] = 'Start: '+(str)(xStart_time) +'; End: '+(str)(xEnd_time) + '; Duration: ' +(str)((xEnd_time - xStart_time))
+        xOLS_Summary_M = result.summary()
+        xOLS_text = xOLS_Summary_M.as_text()
+
+        f = open(xDir + 'xOLS_M_' + xY_col +  '_' + x + '.txt','w')
+        f.write(globals()['xSecond_M_'+x] + '\n\n' + xOLS_text + '\r\n')
+        f.close()
+
+        ########## calc annualized return from Monthly returns ##########
+        xCumRtn_Y = (1 + Y).cumprod()
+        xAnnRtn_Y_M = (xCumRtn_Y[len(xCumRtn_Y) - 1] / xCumRtn_Y[0]) ** (1 / (len(xCumRtn_Y) / 12)) - 1
+        xAnnRisk_Y_M = np.sqrt(12 * Y.var())
+        # xMP_M_AnnRtnRisk=xMP_M_AnnRtnRisk.append({'index':'Current Portfolio','AnnRtn':xAnnRtn_M_M,'AnnRisk':xAnnRisk_M_M}, ignore_index=True)
+        # ############################################
+
+        xVar_X = np.array(X.var())
+        xVar_Y = Y.var()
+        xCoef_sq = result.params**2
+        xVar_resid = result.resid.var()
+        xVar_CoefX = xCoef_sq * xVar_X
+        xDelta_var = xVar_Y - np.sum(xVar_CoefX) - xVar_resid       #this is the diversificaation effect
+        xDelta_varX = xDelta_var * xVar_CoefX / np.sum(xVar_CoefX)
+        xVar_X_adj = xVar_CoefX + xDelta_varX
+        xVar_X_adj_pct = xVar_X_adj / xVar_Y
+        xVar_resid_pct = xVar_resid / xVar_Y
+        print (xVar_X_adj_pct, xVar_resid_pct)
+        print(np.sum(xVar_X_adj_pct)+xVar_resid_pct)
+
+        xVar_X_adj_pct = pd.DataFrame(xVar_X_adj_pct)
+        xVar_X_adj_pct.reset_index(inplace=True)
+
+        xVar_X_adj_pct.rename(columns={0: 'Risk_Concentration(%)'},inplace=True)
+        xVar_X_adj_pct.rename(columns={'index': 'Risk_Factor'},inplace=True)
+        xVar_X_adj_pct=xVar_X_adj_pct.append({'Risk_Factor':'Idiosyncratic', 'Risk_Concentration(%)': xVar_resid_pct}, ignore_index=True)
+
+        xVar_X_adj_pct=xVar_X_adj_pct.loc[~xVar_X_adj_pct['Risk_Factor'].isin({'const'})]
+        xSum = xVar_X_adj_pct['Risk_Concentration(%)'].sum()
+        xVar_X_adj_pct=xVar_X_adj_pct.append({'Risk_Factor':'Sum', 'Risk_Concentration(%)': xSum}, ignore_index=True)
+        xVar_X_adj_pct=xVar_X_adj_pct.append({'Risk_Factor':model.endog_names+'(Annual StDev)', 'Risk_Concentration(%)': xAnnRisk_Y_M}, ignore_index=True)
+        xVar_X_adj_pct=xVar_X_adj_pct.append({'Risk_Factor':model.endog_names+'(Annual Rtn)', 'Risk_Concentration(%)': xAnnRtn_Y_M}, ignore_index=True)
+
+        xVar_X_adj_pct['Risk_Concentration(%)'] = xVar_X_adj_pct['Risk_Concentration(%)'].astype(float).map("{:.2%}".format)
+        xVar_X_adj_pct=xVar_X_adj_pct.append({'Risk_Factor':model.endog_names+'(Sharpe Ratio)', 'Risk_Concentration(%)': np.round(xAnnRtn_Y_M/xAnnRisk_Y_M,2)}, ignore_index=True)
+
+        # for x in (result.tvalues.index):
+        #     if x=='const':
+        #         continue
+        #     else:
+        #         #print (x, result.tvalues[x])
+        #         if (abs(result.tvalues[x]) <1.5):
+        #             xVar_X_adj_pct[xVar_X_adj_pct['Risk_Factor'] == x]['Risk_Exposure(%)'] = 'NA'
+        #             #print (x, xVar_X_adj_pct[xVar_X_adj_pct['Risk_Factor']==x]['Risk_Exposure(%)'])
+
+        #####globals()['xRisk_concentration_'+x] = xVar_X_adj_pct
+
+        xRisk_Exposure_M = xVar_X_adj_pct.to_string()
+
+        f = open(xDir + 'xRisk_Concentration_M_' + xY_col + '_' + x + '.txt', 'w')
+        f.write(xRisk_Exposure_M + '\r\n')
+        f.close()
+
+        ################# store Risk Concentration for the Current Portfolio ###############
+        xRiskConcentration_temp = xVar_X_adj_pct[['Risk_Factor', 'Risk_Concentration(%)']].copy()
+        xRiskConcentration_temp.rename(columns={'Risk_Concentration(%)': xY_col}, inplace=True)
+        xRiskConcentration_temp['Risk_Factor'][len(xRiskConcentration_temp) - 1] = 'Sharpe_Ratio'
+        xRiskConcentration_temp['Risk_Factor'][len(xRiskConcentration_temp) - 2] = 'Annual_Rtn'
+        xRiskConcentration_temp['Risk_Factor'][len(xRiskConcentration_temp) - 3] = 'Annual_StdDev'
+        if len(globals()['xRisk_concentration_'+x]) == 0:
+            globals()['xRisk_concentration_'+x] = xRiskConcentration_temp.copy()
+        else:
+            globals()['xRisk_concentration_'+x] = pd.merge(globals()['xRisk_concentration_'+x], xRiskConcentration_temp, on=['Risk_Factor'], how='left')
+
+        # ######################################
+        ############### the following is working on the Std Dev (RISK) ANNUALLY #######
+        xStdDev_indep = (X.std() * np.sqrt(12)).reset_index()
+        xStdDev_indep.rename(columns={0: xY_col, 'index':'Risk_Factor'}, inplace=True)
+        xStdDev_indep = xStdDev_indep.loc[~xStdDev_indep['Risk_Factor'].isin({'const'})]
+        xStdDev_indep[xY_col] = xStdDev_indep[xY_col].astype(float).map("{:.2%}".format)
+        xStdDev_indep = xStdDev_indep.append({'Risk_Factor': 'Start_Date', xY_col: xStartDate_M.strftime('%m/%d/%Y') }, ignore_index=True)
+        xStdDev_indep = xStdDev_indep.append({'Risk_Factor': 'End_Date', xY_col: xEndDate_M.strftime('%m/%d/%Y')}, ignore_index=True)
+        ########
+        xStdDev_X = np.array(X.std()) * np.sqrt(12)
+        xStdDev_Y = Y.std() * np.sqrt(12)
+        xCoef = result.params.abs()
+        xStdDev_resid = result.resid.std() * np.sqrt(12)
+        xStdDev_CoefX = xCoef * xStdDev_X
+        xDelta_StdDev = xStdDev_Y - np.sum(xStdDev_CoefX) - xStdDev_resid #this is the diversification benefit...
+        print('xDelta_StdDev = ', xDelta_StdDev)
+        xAdj_StdDev_resid = False
+        if (xAdj_StdDev_resid == False):
+            xDelta_StdDevX = xDelta_StdDev * xStdDev_CoefX / np.sum(xStdDev_CoefX)
+        else:
+            xDelta_StdDevX = xDelta_StdDev * xStdDev_CoefX / (np.sum(xStdDev_CoefX) + xStdDev_resid)
+            xStdDev_resid = xStdDev_resid + xDelta_StdDev * xStdDev_resid / (np.sum(xStdDev_CoefX) + xStdDev_resid)
+        xStdDev_X_adj = xStdDev_CoefX + xDelta_StdDevX
+
+        xStdDev_X_adj = pd.DataFrame(xStdDev_X_adj)
+        xStdDev_X_adj.reset_index(inplace=True)
+
+        xStdDev_X_adj.rename(columns={0: 'Risk_Exposure(%)'},inplace=True)
+        xStdDev_X_adj.rename(columns={'index': 'Risk_Factor'},inplace=True)
+        xStdDev_X_adj=xStdDev_X_adj.append({'Risk_Factor':'Idiosyncratic', 'Risk_Exposure(%)': xStdDev_resid}, ignore_index=True)
+
+        xStdDev_X_adj=xStdDev_X_adj.loc[~xStdDev_X_adj['Risk_Factor'].isin({'const'})]
+        xSum = xStdDev_X_adj['Risk_Exposure(%)'].sum()
+        xStdDev_X_adj=xStdDev_X_adj.append({'Risk_Factor':'Sum', 'Risk_Exposure(%)': xSum}, ignore_index=True)
+        xStdDev_X_adj=xStdDev_X_adj.append({'Risk_Factor':model.endog_names+'(Annual StDev)', 'Risk_Exposure(%)': xAnnRisk_Y_M}, ignore_index=True)
+        xStdDev_X_adj=xStdDev_X_adj.append({'Risk_Factor':model.endog_names+'(Annual Rtn)', 'Risk_Exposure(%)': xAnnRtn_Y_M}, ignore_index=True)
+
+        #xStdDev_X_adj['Risk_Exposure(%)'] = xStdDev_X_adj['Risk_Exposure(%)'].astype(float).map("{:.2%}".format)
+
+        xStdDev_X_adj=xStdDev_X_adj.append({'Risk_Factor':'Sharpe Ratio (Rtn/Risk)', 'Risk_Exposure(%)': np.round(xAnnRtn_Y_M / xAnnRisk_Y_M,2)}, ignore_index=True)
+        xStdDev_X_adj=xStdDev_X_adj.append({'Risk_Factor':'Diversification benefit', 'Risk_Exposure(%)': xDelta_StdDev}, ignore_index=True)
+
+        if x== 'Current':
+            xStdDev_X_adj.rename(columns={'Risk_Exposure(%)': x + ' Risk (' + xY_col + ')'}, inplace=True)
+        else:
+            xStdDev_X_adj.rename(columns={'Risk_Exposure(%)': x + ' Risk (proposed)'}, inplace=True)
+        globals()['xRisk_exposures_' + x] = xStdDev_X_adj
+
+        xIndex_StdDev=globals()['xRisk_exposures_' + x][
+            globals()['xRisk_exposures_' + x]['Risk_Factor'] == model.endog_names + '(Annual StDev)'].index.values[0]
+        xIndex_Rtn = globals()['xRisk_exposures_' + x][
+            globals()['xRisk_exposures_' + x]['Risk_Factor'] == model.endog_names + '(Annual Rtn)'].index.values[0]
+        globals()['xRisk_exposures_' + x].loc[globals()['xRisk_exposures_' + x].index == xIndex_StdDev, 'Risk_Factor'] = 'Annual StdDev'
+        globals()['xRisk_exposures_' + x].loc[
+            globals()['xRisk_exposures_' + x].index == xIndex_Rtn, 'Risk_Factor'] = 'Annual Rtn'
+
+        globals()['xIdio_exp_' + x] = xStdDev_resid / xSum
+
+        if x=='New':  # second time and last time!
+            xStdDev_X_adj = pd.merge(xRisk_exposures_Current, xRisk_exposures_New, on='Risk_Factor', how='left')
+
+        xRisk_Exposure_M_StdDev = xStdDev_X_adj.to_string()
+
+        ######################################################################
+        #xRisk_Exposure_M.to_csv (xDir + 'xRisk_Exposure_M.txt')
+
+        f = open(xDir + 'xRisk_Exposure_M_' + xY_col +  '_' + x + '.txt','w')
+        f.write(xRisk_Exposure_M_StdDev + '\r\n')
+        f.close()
+        ############### store oefficients for 'Current" portfolio ########
+        if x=='Current':
+            xCoef_temp = pd.DataFrame(result.params).reset_index()
+            xCoef_temp.rename(columns={0: xY_col}, inplace=True)
+            xCoef_temp[xY_col] = xCoef_temp[xY_col].round(4)
+            xCoef_temp.rename(columns={'index': 'Risk_Factor'}, inplace=True)
+            if len(xCoef_table)==0:
+                xCoef_table = xCoef_temp.copy()
+            else:
+                xCoef_table = pd.merge(xCoef_table, xCoef_temp, on=['Risk_Factor'],how='left')
+            ######################
+            xCoefxStdDev_temp = pd.DataFrame(xStdDev_CoefX).reset_index()
+            xCoefxStdDev_temp.rename(columns={0: xY_col}, inplace=True)
+            xCoefxStdDev_temp[xY_col] = xCoefxStdDev_temp[xY_col].round(4)
+            xCoefxStdDev_temp.rename(columns={'index': 'Risk_Factor'}, inplace=True)
+            xCoefxStdDev_temp = xCoefxStdDev_temp.loc[xCoefxStdDev_temp['Risk_Factor']!='const']
+            if len(xCoefxStdDev)==0:
+                xCoefxStdDev = xCoefxStdDev_temp.copy()
+            else:
+                xCoefxStdDev = pd.merge(xCoefxStdDev, xCoefxStdDev_temp, on=['Risk_Factor'],how='left')
+            ###################
+            if len(xStdDev_indep_table)==0:
+                xStdDev_indep_table = xStdDev_indep.copy()
+            else:
+                xStdDev_indep_table = pd.merge(xStdDev_indep_table, xStdDev_indep, on=['Risk_Factor'],how='left')
+        ############### the following is working on the Std Dev (RISK) ANNUALLY with AR(1) error term #######
+        if False:
+            ###################### the following is AR(1) error term #########################
+            from statsmodels.tsa.arima.model import ARIMA as ARIMA
+
+            X2 = X.drop('const', axis=1)
+            sarimax_model = ARIMA(endog=Y, exog=X2, order=(1, 0, 0))  # X already has a constant term, trend='c')  # , seasonal_order=(0,1,1,24))
+            sarimax_results = sarimax_model.fit()
+            sarimax_results.summary()
+
+            xOLS_AR1_Summary_M = sarimax_results.summary()
+            xOLS_AR1_text = xOLS_AR1_Summary_M.as_text()
+
+            f = open(xDir + 'xOLS_AR1_M_' + xY_col + '_' + x + '.txt', 'w')
+            f.write(xOLS_AR1_text + '\r\n')
+            f.close()
+
+            xStdDev_X = np.array(X.std())   #these are already annualized std dev
+            xStdDev_M = Y.std()     #these are already annualized std dev
+            xCoef = sarimax_results.params[:len(X.columns)].abs()
+            xStdDev_resid = np.sqrt(sarimax_results.params[len(X.columns):].values[1] / (1-sarimax_results.params[len(X.columns):].values[0]**2)) #result.resid.std()
+            xStdDev_CoefX = xCoef * xStdDev_X
+            xDelta_StdDev = xStdDev_M - np.sum(xStdDev_CoefX) - xStdDev_resid
+            print('xDelta_StdDev = ', xDelta_StdDev)
+            xAdj_StdDev_resid = False
+            if (xAdj_StdDev_resid == False):
+                xDelta_StdDevX = xDelta_StdDev * xStdDev_CoefX / np.sum(xStdDev_CoefX)
+            else:
+                xDelta_StdDevX = xDelta_StdDev * xStdDev_CoefX / (np.sum(xStdDev_CoefX) + xStdDev_resid)
+                xStdDev_resid = xStdDev_resid + xDelta_StdDev * xStdDev_resid / (np.sum(xStdDev_CoefX) + xStdDev_resid)
+            xStdDev_X_adj = xStdDev_CoefX + xDelta_StdDevX
+
+            xStdDev_X_adj = pd.DataFrame(xStdDev_X_adj)
+            xStdDev_X_adj.reset_index(inplace=True)
+
+            xStdDev_X_adj.rename(columns={0: 'Risk_Exposure(%)'},inplace=True)
+            xStdDev_X_adj.rename(columns={'index': 'Risk_Factor'},inplace=True)
+            xStdDev_X_adj=xStdDev_X_adj.append({'Risk_Factor':'Idiosyncratic', 'Risk_Exposure(%)': xStdDev_resid}, ignore_index=True)
+
+            xStdDev_X_adj=xStdDev_X_adj.loc[~xStdDev_X_adj['Risk_Factor'].isin({'const'})]
+            xSum = xStdDev_X_adj['Risk_Exposure(%)'].sum()
+            xStdDev_X_adj=xStdDev_X_adj.append({'Risk_Factor':'Sum', 'Risk_Exposure(%)': xSum}, ignore_index=True)
+            xStdDev_X_adj=xStdDev_X_adj.append({'Risk_Factor':model.endog_names+'(Annual StDev)', 'Risk_Exposure(%)': xAnnRisk_M_M}, ignore_index=True)
+            xStdDev_X_adj=xStdDev_X_adj.append({'Risk_Factor':model.endog_names+'(Annual Rtn)', 'Risk_Exposure(%)': xAnnRtn_M_M}, ignore_index=True)
+
+            #xStdDev_X_adj['Risk_Exposure(%)'] = xStdDev_X_adj['Risk_Exposure(%)'].astype(float).map("{:.2%}".format)
+
+            xStdDev_X_adj=xStdDev_X_adj.append({'Risk_Factor':'Sharpe Ratio (Rtn/Risk)', 'Risk_Exposure(%)': np.round(xAnnRtn_M_M / xAnnRisk_M_M,2)}, ignore_index=True)
+
+            if x== 'Current':
+                xStdDev_X_adj.rename(columns={'Risk_Exposure(%)': x + ' Risk (' + xY_col + ')'}, inplace=True)
+            else:
+                xStdDev_X_adj.rename(columns={'Risk_Exposure(%)': x + ' Risk (proposed)'}, inplace=True)
+            globals()['xRisk_exposures_' + x] = xStdDev_X_adj
+
+            xIndex_StdDev=globals()['xRisk_exposures_' + x][
+                globals()['xRisk_exposures_' + x]['Risk_Factor'] == model.endog_names + '(Annual StDev)'].index.values[0]
+            xIndex_Rtn = globals()['xRisk_exposures_' + x][
+                globals()['xRisk_exposures_' + x]['Risk_Factor'] == model.endog_names + '(Annual Rtn)'].index.values[0]
+            globals()['xRisk_exposures_' + x].loc[globals()['xRisk_exposures_' + x].index == xIndex_StdDev, 'Risk_Factor'] = 'Annual StdDev'
+            globals()['xRisk_exposures_' + x].loc[
+                globals()['xRisk_exposures_' + x].index == xIndex_Rtn, 'Risk_Factor'] = 'Annual Rtn'
+
+            globals()['xIdio_exp_' + x] = xStdDev_resid / xSum
+
+            if x=='New':  # second time and last time!
+                xStdDev_X_adj = pd.merge(xRisk_exposures_Current, xRisk_exposures_New, on='Risk_Factor', how='left')
+
+
+            xRisk_Exposure_M_StdDev = xStdDev_X_adj.to_string()
+
+            ######################################################################
+            #xRisk_Exposure_M.to_csv (xDir + 'xRisk_Exposure_M.txt')
+
+            f = open(xDir + 'xRisk_Exposure_M_AR(1)_' + xY_col +  '_' + x + '.txt','w')
+            f.write(xRisk_Exposure_M_StdDev + '\r\n')
+            f.close()
+
+    ######################
+    xStdDev_X_M = pd.DataFrame(X.std()).reset_index()
+    xStdDev_X_M.rename(columns={0:'Risk_Factor_AnnStdDev'}, inplace=True)
+    xStdDev_X_M.rename(columns={'index':'Risk_Factor'}, inplace=True)
+    xStdDev_X_adj = pd.merge(xStdDev_X_adj,xStdDev_X_M, on=['Risk_Factor'],how='left')
+    xStdDev_X_adj['Risk_Exp (Current)'] = xStdDev_X_adj['Current Risk ('+xY_col+')']/xStdDev_X_adj['Risk_Factor_AnnStdDev']
+    xStdDev_X_adj['Risk_Exp (New)'] = xStdDev_X_adj['New Risk (proposed)']/xStdDev_X_adj['Risk_Factor_AnnStdDev']
+    xStdDev_X_adj.loc[xStdDev_X_adj['Risk_Factor']=='Idiosyncratic','Risk_Exp (Current)']=xIdio_exp_Current
+    xStdDev_X_adj.loc[xStdDev_X_adj['Risk_Factor']=='Idiosyncratic','Risk_Exp (New)']=xIdio_exp_New
+    xSum_Risk_Exp_Current = xStdDev_X_adj['Risk_Exp (Current)'].sum()
+    xSum_Risk_Exp_New = xStdDev_X_adj['Risk_Exp (New)'].sum()
+    xStdDev_X_adj['Risk_Exp (Current)'] = xStdDev_X_adj['Risk_Exp (Current)']/xSum_Risk_Exp_Current
+    xStdDev_X_adj['Risk_Exp (New)'] = xStdDev_X_adj['Risk_Exp (New)']/xSum_Risk_Exp_New
+    xSum_Risk_Exp_Current = xStdDev_X_adj['Risk_Exp (Current)'].sum()
+    xSum_Risk_Exp_New = xStdDev_X_adj['Risk_Exp (New)'].sum()
+    xStdDev_X_adj.loc[xStdDev_X_adj['Risk_Factor']=='Sum','Risk_Exp (Current)']=xSum_Risk_Exp_Current
+    xStdDev_X_adj.loc[xStdDev_X_adj['Risk_Factor']=='Sum','Risk_Exp (New)']=xSum_Risk_Exp_New
+
+    xPart_1=xStdDev_X_adj.loc[xStdDev_X_adj.index<len(xStdDev_X_adj)-1]
+    xPart_2=xStdDev_X_adj.loc[xStdDev_X_adj.index==len(xStdDev_X_adj)-1]
+
+    xPart_1['Current Risk ('+xY_col+')'] = xPart_1['Current Risk ('+xY_col+')'].astype(float).map("{:.2%}".format)
+    xPart_1['New Risk (proposed)'] = xPart_1['New Risk (proposed)'].astype(float).map("{:.2%}".format)
+    xPart_1['Risk_Factor_AnnStdDev'] = xPart_1['Risk_Factor_AnnStdDev'].astype(float).map("{:.2%}".format)
+    xPart_1['Risk_Exp (Current)'] = xPart_1['Risk_Exp (Current)'].astype(float).map("{:.2%}".format)
+    xPart_1['Risk_Exp (New)'] = xPart_1['Risk_Exp (New)'].astype(float).map("{:.2%}".format)
+
+    xStdDev_X_adj=xPart_1.append(xPart_2, ignore_index=True)
+
+    xStdDev_X_adj = xStdDev_X_adj.replace({'nan%': ''})
+    xStdDev_X_adj = xStdDev_X_adj.replace({np.nan: ''})
+
+    xRisk_Exposure_M_StdDev = xStdDev_X_adj.to_string()
+    #xStdDev_X_adj['Risk_Exposure(%)'] = xStdDev_X_adj['Risk_Exposure(%)'].astype(float).map("{:.2%}".format)
+    ######################
+    f = open(xDir + 'xRisk_Exposure_M_' + xY_col + '.txt','w')
+    f.write('From '+xStartDate_M.strftime('%Y-%m-%d') +' to ' + xEndDate_M.strftime('%Y-%m-%d') + '\n\n' +xRisk_Exposure_M_StdDev + '\r\n')
+    f.close()
+    ################# store Risk Exposures for the Current Portfolio ###############
+    xRiskExp_Current_temp = xStdDev_X_adj[['Risk_Factor','Risk_Exp (Current)']].copy()
+    xRiskExp_Current_temp.rename(columns={'Risk_Exp (Current)':xY_col}, inplace=True)
+    if len(xRiskExp_Current)==0:
+        xRiskExp_Current = xRiskExp_Current_temp.copy()
+    else:
+        xRiskExp_Current = pd.merge(xRiskExp_Current,xRiskExp_Current_temp,on=['Risk_Factor'],how='left')
+
+#res = pd.concat([xRiskExp_Current, xCoef_table], axis=1, keys=["Risk_Exp", "Coefs"])
+d={} #dictionary of dataframe
+xRiskExp_Current2 = xRiskExp_Current.loc[xRiskExp_Current['Risk_Factor'].isin(list(xRiskFactorSet_M+['Idiosyncratic']))]
+d['Current_Risk_Exposures']=xRiskExp_Current2.set_index('Risk_Factor')
+d=pd.concat(d, axis=1)
+
+A={}
+xCoef_table2 = xCoef_table.loc[xCoef_table['Risk_Factor'].isin(xRiskFactorSet_M)]
+A['Coefficients']=xCoef_table2.set_index('Risk_Factor')
+A=pd.concat(A, axis=1)
+
+B={}
+##xRisk_concentration_Current2 = xRisk_concentration_Current.loc[xRisk_concentration_Current['Risk_Factor'].isin(xRiskFactorSet_M)]
+B['Current_Risk_Concentration']=xRisk_concentration_Current.set_index('Risk_Factor')
+B=pd.concat(B, axis=1)
+
+C={}
+###xRisk_concentration_New2 = xRisk_concentration_New.loc[xRisk_concentration_New['Risk_Factor'].isin(xRiskFactorSet_M)]
+C['New_Risk_Concentration']=xRisk_concentration_New.set_index('Risk_Factor')
+C=pd.concat(C, axis=1)
+
+# create excel writer
+if xOrthogonal == 'orthog':
+    writer = pd.ExcelWriter(xDir + 'xRiskFactorExp_Corre_orthog.xlsx')
+
+    A.reset_index().to_excel(writer, 'Coefficients_orthog')
+    xStdDev_indep_table.to_excel(writer, 'Ann_StdDev_RiskFactor_orthog')
+    xCoefxStdDev.to_excel(writer, 'Coef_x_StdDev_orthog')
+    xRiskFactorCorrelations_orthog.to_excel(writer, 'Corre_RiskFactor_orthog')
+
+    d.reset_index().to_excel(writer, 'Risk_Exposures_orthog')
+    B.reset_index().to_excel(writer, 'Risk_Concentration_orthog')
+else:
+    writer = pd.ExcelWriter(xDir + 'xRiskFactorExp_Corre_raw.xlsx')
+    d.reset_index().to_excel(writer, 'Risk_Exposures_raw')
+    A.reset_index().to_excel(writer, 'Coefficients_raw')
+    xRiskFactorCorrelations_raw.to_excel(writer, 'Corre_RiskFactor_raw')
+    B.reset_index().to_excel(writer, 'Risk_Concentration_raw')
+
+# save the excel file
+writer.save()
+writer.close()
+###
+#
+#
+#### Scatter plots for Current Portfolio vs 6 Model Portfolios (Using Daily, Monthly, Qquarterly and Annual Rtns #####
+import matplotlib.pyplot as plt
+
+xFreq = ''
+for k in range(1,2):
+    if k==0:
+        xRtn_Risk_Name = 'xMP_D_AnnRtnRisk'
+        xFreq = '(using daily data)'
+        xStartDate = xStartDate_D
+        xEndDate = xEndDate_D
+
+    elif k == 1:
+        xRtn_Risk_Name = 'xMP_M_AnnRtnRisk'
+        xFreq = '(using monthly data)'
+        xStartDate = xStartDate_M
+        xEndDate = xEndDate_M
+    elif k == 2:
+        xRtn_Risk_Name = 'xMP_Q_AnnRtnRisk'
+        xFreq = '(using quarterly data)'
+        xStartDate = xStartDate_Q
+        xEndDate = xEndDate_Q
+    elif k == 3:
+        xRtn_Risk_Name = 'xMP_Y_AnnRtnRisk'
+        xFreq = '(using annual data)'
+        xStartDate = xStartDate_Y
+        xEndDate = xEndDate_Y
+
+    xMP_Rtn_Risk=globals()[xRtn_Risk_Name].copy()
+    #xMP_Rtn_Risk=xMP_M_AnnRtnRisk.copy()
+
+    xMP_name = pd.DataFrame()
+    xMP_name['name']=''
+    xMP_name['Rtn_Risk']=''
+    xRtn= xMP_Rtn_Risk['AnnRtn'][0]
+    xRisk= xMP_Rtn_Risk['AnnRisk'][0]
+    xRtn_Risk = '('+f'{round(xRtn*100,1)}%' + ','+f'{round(xRisk*100,1)}%'+','+f'{round(xRtn/xRisk,2)}'+')'
+    xMP_name = xMP_name.append({'name':'Conservative','Rtn_Risk': xRtn_Risk}, ignore_index=True)
+    xRtn= xMP_Rtn_Risk['AnnRtn'][1]
+    xRisk= xMP_Rtn_Risk['AnnRisk'][1]
+    xRtn_Risk = '('+f'{round(xRtn*100,1)}%' + ','+f'{round(xRisk*100,1)}%'+','+f'{round(xRtn/xRisk,2)}'+')'
+    xMP_name = xMP_name.append({'name':'Moderate Conservative','Rtn_Risk': xRtn_Risk}, ignore_index=True)
+    xRtn= xMP_Rtn_Risk['AnnRtn'][2]
+    xRisk= xMP_Rtn_Risk['AnnRisk'][2]
+    xRtn_Risk = '('+f'{round(xRtn*100,1)}%' + ','+f'{round(xRisk*100,1)}%'+','+f'{round(xRtn/xRisk,2)}'+')'
+    xMP_name = xMP_name.append({'name':'Moderate','Rtn_Risk': xRtn_Risk}, ignore_index=True)
+    xRtn= xMP_Rtn_Risk['AnnRtn'][3]
+    xRisk= xMP_Rtn_Risk['AnnRisk'][3]
+    xRtn_Risk = '('+f'{round(xRtn*100,1)}%' + ','+f'{round(xRisk*100,1)}%'+','+f'{round(xRtn/xRisk,2)}'+')'
+    xMP_name = xMP_name.append({'name':'Moderate Growth','Rtn_Risk': xRtn_Risk}, ignore_index=True)
+    xRtn= xMP_Rtn_Risk['AnnRtn'][4]
+    xRisk= xMP_Rtn_Risk['AnnRisk'][4]
+    xRtn_Risk = '('+f'{round(xRtn*100,1)}%' + ','+f'{round(xRisk*100,1)}%'+','+f'{round(xRtn/xRisk,2)}'+')'
+    xMP_name = xMP_name.append({'name':'Growth','Rtn_Risk': xRtn_Risk}, ignore_index=True)
+    xRtn= xMP_Rtn_Risk['AnnRtn'][5]
+    xRisk= xMP_Rtn_Risk['AnnRisk'][5]
+    xRtn_Risk = '('+f'{round(xRtn*100,1)}%' + ','+f'{round(xRisk*100,1)}%'+','+f'{round(xRtn/xRisk,2)}'+')'
+    xMP_name = xMP_name.append({'name':'Maximum Growth','Rtn_Risk': xRtn_Risk}, ignore_index=True)
+    # xRtn= xMP_Rtn_Risk['AnnRtn'][6]
+    # xRisk= xMP_Rtn_Risk['AnnRisk'][6]
+    # xRtn_Risk = '('+f'{round(xRtn*100,1)}%' + ','+f'{round(xRisk*100,1)}%'+','+f'{round(xRtn/xRisk,2)}'+')'
+    # xMP_name = xMP_name.append({'name':'Current Portfoio','Rtn_Risk': xRtn_Risk}, ignore_index=True)
+    # xRtn= xMP_Rtn_Risk['AnnRtn'][7]
+    # xRisk= xMP_Rtn_Risk['AnnRisk'][7]
+    # xRtn_Risk = '('+f'{round(xRtn*100,1)}%' + ','+f'{round(xRisk*100,1)}%'+','+f'{round(xRtn/xRisk,2)}'+')'
+    # xMP_name = xMP_name.append({'name':'New Portfoio','Rtn_Risk': xRtn_Risk}, ignore_index=True)
+    #######
+    xMP_Rtn_Risk['Lable']=''
+    xMP_Rtn_Risk['Rtn_Risk']=''
+    i=0
+    for x in xMP_name['name']:
+        xMP_Rtn_Risk['Lable'][i]=xMP_name['name'][i]
+        xMP_Rtn_Risk['Rtn_Risk'][i]=xMP_name['Rtn_Risk'][i]
+        i=i+1
+    ##############
+    x = xMP_Rtn_Risk['AnnRisk'].values
+    y = xMP_Rtn_Risk['AnnRtn'].values
+    #types = xMP_Rtn_Risk.reset_index()['index'].values
+    #types = xMP_Rtn_Risk['index'].values
+    types = xMP_Rtn_Risk['Lable'].values
+
+    fig, ax = plt.subplots()
+    #ax.plot(risks, returns, color='red', label='Equity/Bond')      # this is a line (efficient frontier)
+    xSubText = xFreq + ' from ' + xStartDate.strftime('%m/%d/%Y') + ' to ' + xEndDate.strftime('%m/%d/%Y')
+    fig.suptitle('Return and Risk of the Current Portfolio (' + xY_col+') vs Model Portfolios \n' + xSubText, fontsize=13,y=0.98)
+    #ax.set_xlabel('Risk (Annualized Std)', fontsize=10)
+    #ax.set_ylabel('Annualized Return', fontsize=10)
+
+    #fig, ax = plt.subplots(figsize=(10,10))
+    ax.scatter(x, y)
+
+    ax.set_xlabel('Annualized Risk', fontsize=12)
+    ax.set_ylabel('Annualized Return', fontsize=12)
+    #ax.set_title('(Return and Risk) of the Current Portfolio vs Model Portfolios ' + xSubText, fontsize=18)
+
+    for i, txt in enumerate(types):
+        ax.annotate(txt + '\n' + xMP_Rtn_Risk['Rtn_Risk'][i], (x[i], y[i]), xytext=(-18,-18), textcoords='offset points',ha="left", size=8)
+        #ax.annotate(txt + '\n', (x[i], y[i]), xytext=(10, 10), textcoords='offset points')
+        plt.scatter(x, y, marker='o', color='blue')
+
+    plt.savefig(xDir + xRtn_Risk_Name +'_'+xY_col+'.png')
+    plt.show()
+
+################## SI and SPXT and BondTR: Rolling Annual Returns and Calendar Monthly Returns ###########
+##############################
+xSI_Y = xDF_M[['DATE','SI2_pct_ch_M','SI4_pct_ch_M','SI6_pct_ch_M','SPXT_pct_ch_M']].copy()
+xSI_Y.dropna(inplace=True)
+xSI_Y.reset_index(drop=True,inplace=True)
+xStartDate_M_SI= xSI_Y['DATE'].min()
+xEndDate_M_SI= xSI_Y['DATE'].max()
+
+xSI_Y_AnnStdDev=pd.DataFrame(xSI_Y.std())   #*np.sqrt(12)
+xSI_Y_AnnStdDev.reset_index(inplace=True)
+xSI_Y_AnnStdDev.rename(columns={0: 'AnnStdDev(%)'},inplace=True)
+
+#########
+xSI_Y_AnnRtn=pd.DataFrame(xSI_Y.mean())
+xSI_Y_AnnRtn.reset_index(inplace=True)
+xSI_Y_AnnRtn.rename(columns={0: 'AnnRtn(%)'},inplace=True)
+##########
+xSI_Y_RtnRisk = pd.merge(xSI_Y_AnnRtn,xSI_Y_AnnStdDev,on=['index'],how='left')
+xSI_Y_RtnRisk['Sharpe Ratio (Rtn/Risk)'] = xSI_Y_RtnRisk['AnnRtn(%)'] / xSI_Y_RtnRisk['AnnStdDev(%)']
+
+xSI_Y_RtnRisk['AnnRtn(%)'] = xSI_Y_RtnRisk['AnnRtn(%)'].astype(float).map("{:.2%}".format)
+xSI_Y_RtnRisk['AnnStdDev(%)'] = xSI_Y_RtnRisk['AnnStdDev(%)'].astype(float).map("{:.2%}".format)
+xSI_Y_RtnRisk['Sharpe Ratio (Rtn/Risk)'] = xSI_Y_RtnRisk['Sharpe Ratio (Rtn/Risk)'].astype(float).map("{:.2f}".format)
+
+########## calc annualized return from Monthly returns ##########
+#xCumRtn_Y = (1 + Y).cumprod()
+xCumRtn_Y = (1 + xDF_M[['SPLPEQTY_pct_ch_M','HFRIEMNI_pct_ch_M','SPXT_pct_ch_M','BondTR_pct_ch_M']]).cumprod()
+xSI_M_AnnRtn = (xCumRtn_Y.iloc[len(xCumRtn_Y) - 1] / xCumRtn_Y.iloc[0]) ** (1 / (len(xCumRtn_Y) / 12)) - 1
+xSI_M_AnnRtn=pd.DataFrame(xSI_M_AnnRtn)
+xSI_M_AnnRtn.reset_index(inplace=True)
+xSI_M_AnnRtn.rename(columns={0: 'AnnRtn(%)'},inplace=True)
+#######
+xSI_M_AnnStdDev=pd.DataFrame(xDF_M[['SPLPEQTY_pct_ch_M','HFRIEMNI_pct_ch_M','SPXT_pct_ch_M','BondTR_pct_ch_M']].std())*np.sqrt(12)
+xSI_M_AnnStdDev.reset_index(inplace=True)
+xSI_M_AnnStdDev.rename(columns={0: 'AnnStdDev(%)'},inplace=True)
+
+############################################
+xSI_M_RtnRisk = pd.merge(xSI_M_AnnRtn,xSI_M_AnnStdDev,on=['index'],how='left')
+xSI_M_RtnRisk['Sharpe Ratio (Rtn/Risk)'] = xSI_M_RtnRisk['AnnRtn(%)'] / xSI_M_RtnRisk['AnnStdDev(%)']
+
+xSI_M_RtnRisk['AnnRtn(%)'] = xSI_M_RtnRisk['AnnRtn(%)'].astype(float).map("{:.2%}".format)
+xSI_M_RtnRisk['AnnStdDev(%)'] = xSI_M_RtnRisk['AnnStdDev(%)'].astype(float).map("{:.2%}".format)
+xSI_M_RtnRisk['Sharpe Ratio (Rtn/Risk)'] = xSI_M_RtnRisk['Sharpe Ratio (Rtn/Risk)'].astype(float).map("{:.2f}".format)
+
+#####################
+#xSI_M_RtnRisk=pd.concat([xSI_Y_RtnRisk,xSI_M_RtnRisk],axis=0).reset_index(drop=True)
+#####################
+xText_RtnRisk = xSI_M_RtnRisk.to_string()
+xText_corr = xDF_M[['SPLPEQTY_pct_ch_M','HFRIEMNI_pct_ch_M','SPXT_pct_ch_M','BondTR_pct_ch_M',
+                    'SI2_pct_ch_M','SI4_pct_ch_M','SI6_pct_ch_M']].corr().to_string()
+
+f = open(xDir + 'xSI_M_AnnRtnRisk_corr.txt','w')
+f.write(xStartDate_M_SI.strftime('%Y/%m/%d') + ' to ' + xEndDate_M_SI.strftime('%Y/%m/%d') + '\n\n'
+        + xText_RtnRisk + '\n\n' + xText_corr)
+f.close()
